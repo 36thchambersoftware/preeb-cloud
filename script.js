@@ -557,18 +557,40 @@
 
   async function loadPoolTickerByBech32(poolBech32) {
     if (!poolBech32) return null;
+    if (poolBech32 === POOL_ID_BECH32) return POOL_TICKER;
     if (poolTickerCache.has(poolBech32)) return poolTickerCache.get(poolBech32);
 
-    const rows = await fetchKoiosJson('/pool_info', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ _pool_bech32_ids: [poolBech32] }),
-    });
+    let ticker = null;
 
-    const ticker = Array.isArray(rows) && rows.length > 0 ? (rows[0].ticker || null) : null;
+    // Try pool_info first.
+    try {
+      const rows = await fetchKoiosJson('/pool_info', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ _pool_bech32_ids: [poolBech32] }),
+      });
+
+      ticker = Array.isArray(rows) && rows.length > 0 ? (rows[0].ticker || null) : null;
+    } catch {
+      ticker = null;
+    }
+
+    // Fallback to pool_list filtered by pool id.
+    if (!ticker) {
+      try {
+        const listRows = await fetchKoiosJson(
+          `/pool_list?pool_id_bech32=eq.${encodeURIComponent(poolBech32)}`,
+          { headers: { Accept: 'application/json' } }
+        );
+        ticker = Array.isArray(listRows) && listRows.length > 0 ? (listRows[0].ticker || null) : null;
+      } catch {
+        ticker = null;
+      }
+    }
+
     poolTickerCache.set(poolBech32, ticker);
     return ticker;
   }
@@ -677,13 +699,20 @@
     if (walletName) walletName.textContent = walletState.walletLabel || '—';
     if (walletStake) walletStake.textContent = walletState.stakeAddress || '—';
     if (walletDelegatedPool) {
-      walletDelegatedPool.textContent = walletState.delegatedPoolTicker || (walletState.delegatedPool ? 'Unknown ticker' : 'Not delegated');
+      if (walletState.delegatedPoolTicker) {
+        walletDelegatedPool.textContent = walletState.delegatedPoolTicker;
+      } else if (walletState.delegatedPool) {
+        walletDelegatedPool.textContent = `${walletState.delegatedPool.slice(0, 12)}...`;
+      } else {
+        walletDelegatedPool.textContent = 'Not delegated';
+      }
     }
 
     if (walletState.delegatedPool === POOL_ID_BECH32) {
       const earned = await calculatePreebRewards(walletState.stakeAddress);
       if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
       if (walletEarned) walletEarned.textContent = formatAdaExact(earned, 2);
+      if (delegateBtn) delegateBtn.hidden = true;
       setWalletStatus('Wallet connected. You are already delegated to PREEB.');
     } else {
       const estimate = calculateEstimatedAnnualPreebRewards(account, apyWindows?.months3);
@@ -691,6 +720,7 @@
         walletEarnedLabel.textContent = 'Estimated Annual Rewards With PREEB (if delegated, based on 3M APY)';
       }
       if (walletEarned) walletEarned.textContent = `${formatAdaExact(estimate, 2)} / year`;
+      if (delegateBtn) delegateBtn.hidden = false;
       setWalletStatus('Wallet connected. You can build a delegation transaction to PREEB below.');
     }
 
@@ -736,6 +766,7 @@
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
         if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
+        if (delegateBtn) delegateBtn.hidden = false;
         if (delegateBtn) delegateBtn.disabled = false;
 
         setWalletStatus(
