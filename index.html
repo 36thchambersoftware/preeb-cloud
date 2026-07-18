@@ -12,6 +12,8 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:site" content="@PREEB_Pool" />
   <meta name="theme-color" content="#0A0E1A" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="shortcut icon" href="favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -29,6 +31,7 @@
       <ul class="nav__links">
         <li><a href="#about">About</a></li>
         <li><a href="#stats">Stats</a></li>
+        <li><a href="#projects">Projects</a></li>
         <li><a href="#community">Community</a></li>
         <li><a href="#delegate" class="btn btn--outline btn--sm">Delegate</a></li>
       </ul>
@@ -241,6 +244,51 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── PROJECTS ─────────── -->
+  <section class="section section--mid" id="projects">
+    <div class="container">
+      <div class="section__header">
+        <span class="section__eyebrow">Built by PREEB</span>
+        <h2 class="section__title">Community Projects</h2>
+        <p class="section__subtitle">Beyond staking, PREEB is building tools and initiatives for the wider Cardano community.</p>
+      </div>
+
+      <div class="projects__grid">
+        <article class="project-card">
+          <img src="images/preebot.png" alt="PREEBOT Discord role automation preview" class="project-card__image" loading="lazy" />
+          <div class="project-card__body">
+            <div class="project-card__meta">Discord Tooling</div>
+            <h3>PREEBOT</h3>
+            <p>
+              PREEBOT is PREEB's custom role bot for Discord. It assigns roles automatically
+              when members link supported wallets, helping organize the community and verify participation.
+            </p>
+            <ul class="project-card__list">
+              <li>Wallet-linked role assignment</li>
+              <li>Community identity automation</li>
+              <li>Built specifically for the PREEB ecosystem</li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="project-card">
+          <img src="images/flowmass.png" alt="Flowmass NFT collection preview" class="project-card__image" loading="lazy" />
+          <div class="project-card__body">
+            <div class="project-card__meta">NFT Initiative</div>
+            <h3>Flowmass</h3>
+            <p>
+              Flowmass is a PREEB-created NFT collection centered around pooling funds together
+              to access higher fund requirements for investing opportunities.
+            </p>
+            <a href="https://www.wayup.io/collection/1d0cf168b30d27c6619e7ca7c18e02c8cebc011bf056216a1ea829ff" target="_blank" rel="noopener" class="btn btn--primary">
+              View Flowmass on Wayup
+            </a>
+          </div>
+        </article>
       </div>
     </div>
   </section>
