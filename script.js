@@ -102,6 +102,22 @@
     return `${Number(rawPercent).toFixed(decimals)}%`;
   }
 
+  function getErrorMessage(err) {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err;
+    if (err instanceof Error && err.message) return err.message;
+
+    // Many wallet APIs return plain objects like { info, code } on reject.
+    const info = err.info || err.reason || err.error || err.message;
+    if (typeof info === 'string' && info.trim()) return info;
+
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+
   function hexToBytes(hex) {
     if (!hex || typeof hex !== 'string') return new Uint8Array();
     const bytes = new Uint8Array(hex.length / 2);
@@ -595,6 +611,17 @@
     return ticker;
   }
 
+  function isDelegatedToPreeb(delegatedPool, delegatedTicker) {
+    const normalizedPool = String(delegatedPool || '').trim().toLowerCase();
+    const normalizedTicker = String(delegatedTicker || '').trim().toUpperCase();
+
+    return (
+      normalizedPool === POOL_ID_BECH32.toLowerCase() ||
+      normalizedPool === POOL_ID_HEX.toLowerCase() ||
+      normalizedTicker === POOL_TICKER
+    );
+  }
+
   async function calculatePreebRewards(stakeAddress) {
     const rows = await fetchKoiosJson('/account_rewards', {
       method: 'POST',
@@ -708,11 +735,13 @@
       }
     }
 
-    if (walletState.delegatedPool === POOL_ID_BECH32) {
+    const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
+    if (delegateBtn) delegateBtn.hidden = delegatedToPreeb;
+
+    if (delegatedToPreeb) {
       const earned = await calculatePreebRewards(walletState.stakeAddress);
       if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
       if (walletEarned) walletEarned.textContent = formatAdaExact(earned, 2);
-      if (delegateBtn) delegateBtn.hidden = true;
       setWalletStatus('Wallet connected. You are already delegated to PREEB.');
     } else {
       const estimate = calculateEstimatedAnnualPreebRewards(account, apyWindows?.months3);
@@ -720,7 +749,6 @@
         walletEarnedLabel.textContent = 'Estimated Annual Rewards With PREEB (if delegated, based on 3M APY)';
       }
       if (walletEarned) walletEarned.textContent = `${formatAdaExact(estimate, 2)} / year`;
-      if (delegateBtn) delegateBtn.hidden = false;
       setWalletStatus('Wallet connected. You can build a delegation transaction to PREEB below.');
     }
 
@@ -766,7 +794,9 @@
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
         if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
-        if (delegateBtn) delegateBtn.hidden = false;
+        if (delegateBtn) {
+          delegateBtn.hidden = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
+        }
         if (delegateBtn) delegateBtn.disabled = false;
 
         setWalletStatus(
@@ -776,8 +806,9 @@
         );
       }
     } catch (err) {
-      setWalletStatus(`Wallet connection failed: ${err.message}`, true);
-      console.warn('[PREEB] Wallet connect failed:', err.message);
+      const message = getErrorMessage(err);
+      setWalletStatus(`Wallet connection failed: ${message}`, true);
+      console.warn('[PREEB] Wallet connect failed:', message, err);
     }
   }
 
@@ -918,8 +949,9 @@
       setWalletStatus(`Delegation submitted. Tx hash: ${txHash}`);
       await refreshWalletState();
     } catch (err) {
-      setWalletStatus(`Delegation transaction failed: ${err.message}`, true);
-      console.warn('[PREEB] Delegation tx failed:', err.message);
+      const message = getErrorMessage(err);
+      setWalletStatus(`Delegation transaction failed: ${message}`, true);
+      console.warn('[PREEB] Delegation tx failed:', message, err);
     }
   }
 
