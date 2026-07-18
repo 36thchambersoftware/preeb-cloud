@@ -8,6 +8,16 @@ function toHeaderObject(headers) {
   return out;
 }
 
+function normalizeSegments(input) {
+  const placeholderSegment = /^(\[?\.\.\.path\]?|\(\.\.\.path\)|path)$/i;
+
+  return input
+    .map((segment) => String(segment || '').trim())
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment))
+    .filter((segment) => !placeholderSegment.test(segment));
+}
+
 export default async function handler(req, res) {
   const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -20,17 +30,24 @@ export default async function handler(req, res) {
     return;
   }
 
-  const pathParam = req.query.path;
-  const querySegments = Array.isArray(pathParam)
-    ? pathParam
-    : [pathParam].filter(Boolean);
+  const candidatePathParam =
+    req.query.path ??
+    req.query['...path'] ??
+    req.query['[...path]'] ??
+    req.query.endpoint;
+
+  const querySegments = normalizeSegments(
+    Array.isArray(candidatePathParam)
+      ? candidatePathParam
+      : [candidatePathParam].filter(Boolean)
+  );
 
   // Fallback for environments where catch-all params are not exposed on req.query.
   const rawUrl = typeof req.url === 'string' ? req.url : '';
   const pathname = rawUrl.split('?')[0] || '';
   const prefix = '/api/koios/';
   const fromUrl = pathname.startsWith(prefix)
-    ? pathname.slice(prefix.length).split('/').filter(Boolean)
+    ? normalizeSegments(pathname.slice(prefix.length).split('/').filter(Boolean))
     : [];
 
   const segments = querySegments.length > 0 ? querySegments : fromUrl;
@@ -43,7 +60,7 @@ export default async function handler(req, res) {
 
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(req.query)) {
-    if (key === 'path') continue;
+    if (key === 'path' || key === '...path' || key === '[...path]' || key === 'endpoint') continue;
     if (Array.isArray(value)) {
       for (const v of value) query.append(key, String(v));
     } else if (value != null) {
