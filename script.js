@@ -256,6 +256,7 @@
     if (rect.top < window.innerHeight) {
       statsLoaded = true;
       loadPoolStats();
+      observer.unobserve(statsSection);
     }
   }
 
