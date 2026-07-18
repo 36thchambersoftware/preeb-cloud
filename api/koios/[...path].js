@@ -21,7 +21,19 @@ export default async function handler(req, res) {
   }
 
   const pathParam = req.query.path;
-  const segments = Array.isArray(pathParam) ? pathParam : [pathParam].filter(Boolean);
+  const querySegments = Array.isArray(pathParam)
+    ? pathParam
+    : [pathParam].filter(Boolean);
+
+  // Fallback for environments where catch-all params are not exposed on req.query.
+  const rawUrl = typeof req.url === 'string' ? req.url : '';
+  const pathname = rawUrl.split('?')[0] || '';
+  const prefix = '/api/koios/';
+  const fromUrl = pathname.startsWith(prefix)
+    ? pathname.slice(prefix.length).split('/').filter(Boolean)
+    : [];
+
+  const segments = querySegments.length > 0 ? querySegments : fromUrl;
   const targetPath = segments.join('/');
 
   if (!targetPath) {
