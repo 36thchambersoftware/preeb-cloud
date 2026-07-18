@@ -854,6 +854,15 @@
         throw new Error('Could not fetch tip data for tx TTL');
       }
 
+      const readProtocolParam = (...keys) => {
+        for (const key of keys) {
+          const raw = protocolParams?.[key];
+          const value = Number(raw);
+          if (Number.isFinite(value) && value > 0) return value;
+        }
+        return null;
+      };
+
       const cfgBuilder = csl.TransactionBuilderConfigBuilder.new()
         .fee_algo(csl.LinearFee.new(
           csl.BigNum.from_str(String(protocolParams.txFeePerByte)),
@@ -864,8 +873,38 @@
         .max_tx_size(Number(protocolParams.maxTxSize))
         .max_value_size(Number(protocolParams.maxValueSize));
 
-      if (cfgBuilder.coins_per_utxo_byte) {
-        cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(protocolParams.utxoCostPerByte)));
+      let utxoCostPerByte = readProtocolParam(
+        'utxoCostPerByte',
+        'coinsPerUtxoByte',
+        'coins_per_utxo_byte'
+      );
+      let utxoCostPerWord = readProtocolParam(
+        'utxoCostPerWord',
+        'coinsPerUtxoWord',
+        'coins_per_utxo_word',
+        'lovelacePerUTxOWord'
+      );
+
+      // Cross-era compatibility between CSL versions expecting byte vs word pricing.
+      if (utxoCostPerByte == null && utxoCostPerWord != null) {
+        utxoCostPerByte = Math.ceil(utxoCostPerWord / 8);
+      }
+      if (utxoCostPerWord == null && utxoCostPerByte != null) {
+        utxoCostPerWord = utxoCostPerByte * 8;
+      }
+
+      let utxoCostWasSet = false;
+      if (cfgBuilder.coins_per_utxo_byte && utxoCostPerByte != null) {
+        cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(Math.trunc(utxoCostPerByte))));
+        utxoCostWasSet = true;
+      }
+      if (!utxoCostWasSet && cfgBuilder.coins_per_utxo_word && utxoCostPerWord != null) {
+        cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(Math.trunc(utxoCostPerWord))));
+        utxoCostWasSet = true;
+      }
+
+      if (!utxoCostWasSet && (cfgBuilder.coins_per_utxo_byte || cfgBuilder.coins_per_utxo_word)) {
+        throw new Error('Could not determine coins_per_utxo protocol parameter for this network era.');
       }
 
       const txBuilder = csl.TransactionBuilder.new(cfgBuilder.build());
@@ -961,8 +1000,15 @@
 
     if (!buttonsWrap || !delegateBtn) return;
 
+    // Keep tx action hidden until a wallet session is connected.
+    delegateBtn.hidden = true;
+    delegateBtn.disabled = true;
+
     const renderWalletButtons = () => {
       if (walletState.api) return true;
+
+      delegateBtn.hidden = true;
+      delegateBtn.disabled = true;
 
       const available = getAvailableWallets();
       if (available.length === 0) {
