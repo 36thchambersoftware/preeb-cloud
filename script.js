@@ -7,9 +7,10 @@
   'use strict';
 
   // ─── Config ───────────────────────────────────────────────────
-  const POOL_TICKER    = 'PREEB';
-  const KOIOS_BASE     = 'https://api.koios.rest/api/v1';
-  const DISCORD_INVITE = 'nN5xb7zH7d';
+  const POOL_TICKER      = 'PREEB';
+  const POOL_ID_BECH32   = 'pool19peeq2czwunkwe3s70yuvwpsrqcyndlqnxvt67usz98px57z7fk';
+  const KOIOS_DIRECT_URL = 'https://api.koios.rest/api/v1';
+  const DISCORD_INVITE   = 'nN5xb7zH7d';
 
   // ─── Footer year ──────────────────────────────────────────────
   const yearEl = document.getElementById('year');
@@ -57,6 +58,53 @@
     return Number(n).toLocaleString();
   }
 
+  /** Build possible Koios base URLs in priority order. */
+  function getKoiosBases() {
+    const globalBase = window.PREEB_KOIOS_BASE;
+    const bases = [];
+
+    if (typeof globalBase === 'string' && globalBase.trim()) {
+      bases.push(globalBase.trim().replace(/\/$/, ''));
+    }
+
+    // Prefer same-origin proxy when available to avoid browser CORS issues.
+    bases.push('/api/koios');
+    bases.push(KOIOS_DIRECT_URL);
+
+    return [...new Set(bases)];
+  }
+
+  async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from ${url}`);
+      }
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function fetchKoiosJson(path, options = {}) {
+    const bases = getKoiosBases();
+    let lastError;
+
+    for (const base of bases) {
+      try {
+        const url = `${base}${path}`;
+        return await fetchJsonWithTimeout(url, options);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('All Koios endpoints failed');
+  }
+
   /**
    * Build a stat card element and insert it into the grid.
    * Replaces the skeleton placeholders.
@@ -100,39 +148,18 @@
   // ─── Pool Stats via Koios ──────────────────────────────────────
   async function loadPoolStats() {
     try {
-      // 1. Find the pool by ticker
-      const listResp = await fetch(
-        `${KOIOS_BASE}/pool_list?ticker=eq.${encodeURIComponent(POOL_TICKER)}`,
-        { headers: { 'Accept': 'application/json' } }
-      );
-
-      if (!listResp.ok) throw new Error('Pool list request failed');
-
-      const pools = await listResp.json();
-
-      if (!Array.isArray(pools) || pools.length === 0) {
-        showStatsFallback();
-        return;
-      }
-
-      const poolId = pools[0].pool_id_bech32;
-
-      // 2. Get detailed pool info
-      const infoResp = await fetch(`${KOIOS_BASE}/pool_info`, {
+      // 1) Primary path: detailed data from pool_info.
+      const infos = await fetchKoiosJson('/pool_info', {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ _pool_bech32_ids: [poolId] }),
+        body: JSON.stringify({ _pool_bech32_ids: [POOL_ID_BECH32] }),
       });
 
-      if (!infoResp.ok) throw new Error('Pool info request failed');
-
-      const infos = await infoResp.json();
       if (!Array.isArray(infos) || infos.length === 0) {
-        showStatsFallback();
-        return;
+        throw new Error('No pool info returned from Koios');
       }
 
       const p = infos[0];
@@ -186,8 +213,72 @@
       renderStatCards(cards);
 
     } catch (err) {
-      console.warn('[PREEB] Could not load pool stats:', err.message);
-      showStatsFallback();
+      // 2) Fallback path: pool_list has fewer fields but keeps stats useful.
+      try {
+        const pools = await fetchKoiosJson(
+          `/pool_list?ticker=eq.${encodeURIComponent(POOL_TICKER)}`,
+          { headers: { 'Accept': 'application/json' } }
+        );
+
+        if (!Array.isArray(pools) || pools.length === 0) {
+          throw new Error('Pool list returned no data');
+        }
+
+        const p = pools[0];
+
+        const liveStakeEl  = document.getElementById('pool-live-stake');
+        const delegatorsEl = document.getElementById('pool-delegators');
+        const marginEl     = document.getElementById('pool-margin');
+
+        if (liveStakeEl && p.active_stake) {
+          liveStakeEl.textContent = formatAda(p.active_stake);
+        }
+        if (delegatorsEl) {
+          delegatorsEl.textContent = '—';
+        }
+        if (marginEl && p.margin != null) {
+          marginEl.textContent = formatPercent(p.margin);
+        }
+
+        const cards = [
+          {
+            label: 'Ticker',
+            value: p.ticker || POOL_TICKER,
+            sub:   'Pool identifier',
+          },
+          {
+            label: 'Active Stake',
+            value: p.active_stake ? formatAda(p.active_stake) : '—',
+            sub:   'Current active ADA stake',
+          },
+          {
+            label: 'Margin',
+            value: p.margin != null ? formatPercent(p.margin) : '—',
+            sub:   'Operator fee percentage',
+          },
+          {
+            label: 'Fixed Cost',
+            value: p.fixed_cost ? formatAda(p.fixed_cost) : '—',
+            sub:   'Minimum fee per epoch',
+          },
+          {
+            label: 'Pledge',
+            value: p.pledge ? formatAda(p.pledge) : '—',
+            sub:   "Operator's own stake",
+          },
+          {
+            label: 'Status',
+            value: p.pool_status || '—',
+            sub:   'Registration status',
+          },
+        ];
+
+        renderStatCards(cards);
+      } catch (fallbackErr) {
+        console.warn('[PREEB] Could not load pool stats:', err.message);
+        console.warn('[PREEB] Pool list fallback failed:', fallbackErr.message);
+        showStatsFallback();
+      }
     }
   }
 
@@ -230,12 +321,6 @@
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
 
-      if (entry.target.id === 'stats' && !statsLoaded) {
-        statsLoaded = true;
-        loadPoolStats();
-        observer.unobserve(entry.target);
-      }
-
       if (entry.target.id === 'community' && !discordLoaded) {
         discordLoaded = true;
         loadDiscordStats();
@@ -250,14 +335,11 @@
   if (statsSection)     observer.observe(statsSection);
   if (communitySection) observer.observe(communitySection);
 
-  // Also load immediately if already visible (e.g. user scrolled down)
-  if (statsSection) {
-    const rect = statsSection.getBoundingClientRect();
-    if (rect.top < window.innerHeight) {
-      statsLoaded = true;
-      loadPoolStats();
-      observer.unobserve(statsSection);
-    }
+  // Load pool stats immediately so hero ticker updates as soon as possible.
+  if (!statsLoaded) {
+    statsLoaded = true;
+    loadPoolStats();
+    if (statsSection) observer.unobserve(statsSection);
   }
 
 })();
