@@ -284,11 +284,8 @@
     if (CSL) return CSL;
 
     const candidates = [
-      'https://esm.sh/@emurgo/cardano-serialization-lib-browser@12.1.1?bundle',
-      'https://esm.sh/@emurgo/cardano-serialization-lib-browser@12.1.1',
       'https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1',
       'https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1?bundle',
-      'https://jspm.dev/@emurgo/cardano-serialization-lib-browser',
       'https://jspm.dev/@emurgo/cardano-serialization-lib-asmjs',
     ];
 
@@ -912,7 +909,7 @@
         return null;
       };
 
-      const cfgBuilder = csl.TransactionBuilderConfigBuilder.new()
+      let cfgBuilder = csl.TransactionBuilderConfigBuilder.new()
         .fee_algo(csl.LinearFee.new(
           csl.BigNum.from_str(String(protocolParams.txFeePerByte)),
           csl.BigNum.from_str(String(protocolParams.txFeeFixed))
@@ -957,11 +954,17 @@
 
       let utxoCostWasSet = false;
       if (typeof cfgBuilder.coins_per_utxo_byte === 'function' && utxoCostPerByte != null) {
-        cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(Math.trunc(utxoCostPerByte))));
+        const next = cfgBuilder.coins_per_utxo_byte(
+          csl.BigNum.from_str(String(Math.trunc(utxoCostPerByte)))
+        );
+        if (next) cfgBuilder = next;
         utxoCostWasSet = true;
       }
       if (typeof cfgBuilder.coins_per_utxo_word === 'function' && utxoCostPerWord != null) {
-        cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(Math.trunc(utxoCostPerWord))));
+        const next = cfgBuilder.coins_per_utxo_word(
+          csl.BigNum.from_str(String(Math.trunc(utxoCostPerWord)))
+        );
+        if (next) cfgBuilder = next;
         utxoCostWasSet = true;
       }
 
@@ -984,10 +987,12 @@
         const retryPerWord = Math.trunc(utxoCostPerWord ?? (retryPerByte * 8));
 
         if (typeof cfgBuilder.coins_per_utxo_byte === 'function') {
-          cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(retryPerByte)));
+          const next = cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(retryPerByte)));
+          if (next) cfgBuilder = next;
         }
         if (typeof cfgBuilder.coins_per_utxo_word === 'function') {
-          cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(retryPerWord)));
+          const next = cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(retryPerWord)));
+          if (next) cfgBuilder = next;
         }
 
         txConfig = cfgBuilder.build();
