@@ -38,6 +38,7 @@
     rewardAddressHex: null,
     delegatedPool: null,
     delegatedPoolTicker: null,
+    delegationVerified: false,
     accountInfo: null,
     apyWindows: null,
   };
@@ -701,6 +702,7 @@
 
     walletState.accountInfo = account;
     walletState.delegatedPool = account?.delegated_pool || null;
+    walletState.delegationVerified = true;
 
     if (walletState.delegatedPool) {
       try {
@@ -736,7 +738,16 @@
     }
 
     const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
-    if (delegateBtn) delegateBtn.hidden = delegatedToPreeb;
+    const canDelegate = Boolean(
+      walletState.api &&
+      walletState.stakeAddress &&
+      walletState.delegationVerified &&
+      !delegatedToPreeb
+    );
+    if (delegateBtn) {
+      delegateBtn.hidden = !canDelegate;
+      delegateBtn.disabled = !canDelegate;
+    }
 
     if (delegatedToPreeb) {
       const earned = await calculatePreebRewards(walletState.stakeAddress);
@@ -752,7 +763,7 @@
       setWalletStatus('Wallet connected. You can build a delegation transaction to PREEB below.');
     }
 
-    if (delegateBtn) delegateBtn.disabled = false;
+    if (delegateBtn && canDelegate) delegateBtn.disabled = false;
   }
 
   async function connectWallet(walletConfig) {
@@ -773,6 +784,7 @@
       walletState.api = api;
       walletState.rewardAddressHex = rewardAddresses[0];
       walletState.stakeAddress = await getStakeAddressFromRewardHex(rewardAddresses[0]);
+      walletState.delegationVerified = false;
 
       setWalletStatus(`Connected to ${walletConfig.label}. Loading delegation data...`);
 
@@ -794,10 +806,18 @@
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
         if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
+        walletState.delegationVerified = false;
         if (delegateBtn) {
-          delegateBtn.hidden = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
+          const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
+          const canDelegate = Boolean(
+            walletState.api &&
+            walletState.stakeAddress &&
+            walletState.delegationVerified &&
+            !delegatedToPreeb
+          );
+          delegateBtn.hidden = !canDelegate;
+          delegateBtn.disabled = !canDelegate;
         }
-        if (delegateBtn) delegateBtn.disabled = false;
 
         setWalletStatus(
           `Wallet connected, but delegation lookup failed: ${networkErr.message}. ` +
@@ -806,9 +826,16 @@
         );
       }
     } catch (err) {
+      walletState.delegationVerified = false;
       const message = getErrorMessage(err);
       setWalletStatus(`Wallet connection failed: ${message}`, true);
       console.warn('[PREEB] Wallet connect failed:', message, err);
+
+      const delegateBtn = document.getElementById('wallet-delegate-btn');
+      if (delegateBtn) {
+        delegateBtn.hidden = true;
+        delegateBtn.disabled = true;
+      }
     }
   }
 
@@ -843,11 +870,16 @@
       setWalletStatus('Building delegation transaction...');
       const csl = await loadCardanoSerializationLib();
 
-      const [protocolParams, tipRows, account] = await Promise.all([
+      const [protocolParamsRaw, tipRows, account] = await Promise.all([
         fetchKoiosJson('/cli_protocol_params', { headers: { Accept: 'application/json' } }),
         fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
         loadAccountInfo(walletState.stakeAddress),
       ]);
+
+      const protocolParams = Array.isArray(protocolParamsRaw) ? protocolParamsRaw[0] : protocolParamsRaw;
+      if (!protocolParams || typeof protocolParams !== 'object') {
+        throw new Error('Invalid protocol parameters response from Koios');
+      }
 
       const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
       if (!tip || tip.abs_slot == null) {
@@ -893,12 +925,18 @@
         utxoCostPerWord = utxoCostPerByte * 8;
       }
 
+      if (utxoCostPerByte == null && utxoCostPerWord == null) {
+        // Prevent transaction builder initialization failure in either CSL era.
+        utxoCostPerByte = 4310;
+        utxoCostPerWord = 34480;
+      }
+
       let utxoCostWasSet = false;
       if (cfgBuilder.coins_per_utxo_byte && utxoCostPerByte != null) {
         cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(Math.trunc(utxoCostPerByte))));
         utxoCostWasSet = true;
       }
-      if (!utxoCostWasSet && cfgBuilder.coins_per_utxo_word && utxoCostPerWord != null) {
+      if (cfgBuilder.coins_per_utxo_word && utxoCostPerWord != null) {
         cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(Math.trunc(utxoCostPerWord))));
         utxoCostWasSet = true;
       }
@@ -1000,15 +1038,28 @@
 
     if (!buttonsWrap || !delegateBtn) return;
 
-    // Keep tx action hidden until a wallet session is connected.
-    delegateBtn.hidden = true;
-    delegateBtn.disabled = true;
+    const syncDelegateButton = () => {
+      const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
+      const canDelegate = Boolean(
+        walletState.api &&
+        walletState.stakeAddress &&
+        walletState.delegationVerified &&
+        !delegatedToPreeb
+      );
+      delegateBtn.hidden = !canDelegate;
+      delegateBtn.disabled = !canDelegate;
+    };
+
+    // Keep tx action hidden until connected and delegation status is verified.
+    syncDelegateButton();
 
     const renderWalletButtons = () => {
-      if (walletState.api) return true;
+      if (walletState.api) {
+        syncDelegateButton();
+        return true;
+      }
 
-      delegateBtn.hidden = true;
-      delegateBtn.disabled = true;
+      syncDelegateButton();
 
       const available = getAvailableWallets();
       if (available.length === 0) {
