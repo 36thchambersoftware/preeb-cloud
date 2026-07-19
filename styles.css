@@ -62,6 +62,9 @@ a:hover { text-decoration: underline; }
 img { max-width: 100%; display: block; }
 ul { list-style: none; }
 
+/* Ensure semantic hidden state cannot be overridden by component display rules. */
+[hidden] { display: none !important; }
+
 /* ─── Utilities ─── */
 .container {
   width: 100%;

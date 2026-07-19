@@ -747,6 +747,7 @@
     if (delegateBtn) {
       delegateBtn.hidden = !canDelegate;
       delegateBtn.disabled = !canDelegate;
+      delegateBtn.style.display = canDelegate ? '' : 'none';
     }
 
     if (delegatedToPreeb) {
@@ -817,6 +818,7 @@
           );
           delegateBtn.hidden = !canDelegate;
           delegateBtn.disabled = !canDelegate;
+          delegateBtn.style.display = canDelegate ? '' : 'none';
         }
 
         setWalletStatus(
@@ -835,6 +837,7 @@
       if (delegateBtn) {
         delegateBtn.hidden = true;
         delegateBtn.disabled = true;
+        delegateBtn.style.display = 'none';
       }
     }
   }
@@ -1048,6 +1051,7 @@
       );
       delegateBtn.hidden = !canDelegate;
       delegateBtn.disabled = !canDelegate;
+      delegateBtn.style.display = canDelegate ? '' : 'none';
     };
 
     // Keep tx action hidden until connected and delegation status is verified.
