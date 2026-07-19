@@ -898,19 +898,21 @@
       delegateBtn.style.display = canDelegate ? '' : 'none';
     }
 
+    let earnedAda = null;
     if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
     if (walletEarned) {
-      calculatePreebRewards(walletState.stakeAddress).then((earned) => {
-        walletEarned.textContent = formatAdaExact(earned, 2);
-      }).catch(() => {
+      try {
+        earnedAda = await calculatePreebRewards(walletState.stakeAddress);
+        walletEarned.textContent = formatAdaExact(earnedAda, 2);
+      } catch {
         walletEarned.textContent = 'Unavailable';
-      });
+      }
     }
     if (walletEpochsStaked) {
       walletEpochsStaked.textContent = formatEpochsStaked(account, currentEpoch);
     }
 
-    if (walletEarnedPanel) walletEarnedPanel.hidden = !delegatedToPreeb;
+    if (walletEarnedPanel) walletEarnedPanel.hidden = !delegatedToPreeb || !earnedAda;
 
     if (delegatedToPreeb) {
       setWalletStatus('Wallet connected. You are already delegated to PREEB.');
