@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">PREEB Pool - Cardano Stake Pool</title>
+  <desc id="desc">Delegate to PREEB and support Cardano decentralization.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A0E1A"/>
+      <stop offset="100%" stop-color="#14233F"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#3CC8C8" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#3CC8C8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <g fill="#1A4FD8" opacity="0.18">
+    <circle cx="210" cy="140" r="8"/>
+    <circle cx="280" cy="190" r="6"/>
+    <circle cx="350" cy="130" r="10"/>
+    <circle cx="430" cy="200" r="7"/>
+    <circle cx="980" cy="120" r="9"/>
+    <circle cx="1040" cy="200" r="7"/>
+    <circle cx="930" cy="230" r="6"/>
+  </g>
+
+  <g fill="none" stroke="#3CC8C8" stroke-opacity="0.35" stroke-width="2">
+    <path d="M198 140 L275 190 L344 130 L425 200"/>
+    <path d="M975 120 L1040 200 L930 230"/>
+  </g>
+
+  <text x="90" y="250" fill="#E8ECF2" font-family="Space Grotesk, Inter, sans-serif" font-size="76" font-weight="700">
+    PREEB
+  </text>
+  <text x="90" y="316" fill="#3CC8C8" font-family="Space Grotesk, Inter, sans-serif" font-size="42" font-weight="600">
+    Cardano Stake Pool
+  </text>
+  <text x="90" y="388" fill="#E8ECF2" font-family="Inter, sans-serif" font-size="32" font-weight="500">
+    Delegate to PREEB and support decentralization.
+  </text>
+
+  <g transform="translate(90,454)">
+    <rect x="0" y="0" width="380" height="70" rx="35" fill="#3CC8C8"/>
+    <text x="190" y="45" text-anchor="middle" fill="#0A0E1A" font-family="Space Grotesk, Inter, sans-serif" font-size="30" font-weight="700">
+      preeb.cloud
+    </text>
+  </g>
+</svg>
