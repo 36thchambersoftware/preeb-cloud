@@ -284,16 +284,33 @@
     if (CSL) return CSL;
 
     const candidates = [
+      'https://esm.sh/@emurgo/cardano-serialization-lib-browser@12.1.1?bundle',
+      'https://esm.sh/@emurgo/cardano-serialization-lib-browser@12.1.1',
       'https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1',
       'https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1?bundle',
+      'https://jspm.dev/@emurgo/cardano-serialization-lib-browser',
       'https://jspm.dev/@emurgo/cardano-serialization-lib-asmjs',
     ];
 
     let lastErr;
     for (const url of candidates) {
       try {
-        CSL = await import(url);
-        return CSL;
+        const imported = await import(url);
+        const resolved = imported?.default && imported.default.TransactionBuilder
+          ? imported.default
+          : imported;
+
+        if (
+          resolved &&
+          resolved.TransactionBuilder &&
+          resolved.TransactionBuilderConfigBuilder &&
+          resolved.BigNum
+        ) {
+          CSL = resolved;
+          return CSL;
+        }
+
+        throw new Error(`Imported CSL module missing required tx builder exports from ${url}`);
       } catch (err) {
         lastErr = err;
       }
@@ -541,14 +558,6 @@
           addProvider(key, config.label, provider);
           break;
         }
-      }
-    }
-
-    // Catch extensions with non-standard key names.
-    for (const [key, provider] of Object.entries(window.cardano)) {
-      if (provider && typeof provider.enable === 'function') {
-        const label = provider.name || provider.apiName || key;
-        addProvider(key, label, provider);
       }
     }
 
@@ -828,7 +837,14 @@
     } catch (err) {
       walletState.delegationVerified = false;
       const message = getErrorMessage(err);
-      setWalletStatus(`Wallet connection failed: ${message}`, true);
+      if (/not implemented/i.test(message)) {
+        setWalletStatus(
+          `${walletConfig?.label || 'This wallet'} is not fully implemented for CIP-30 delegation in this browser. Use Eternl, Vespr, Typhon, or Lace.`,
+          true
+        );
+      } else {
+        setWalletStatus(`Wallet connection failed: ${message}`, true);
+      }
       console.warn('[PREEB] Wallet connect failed:', message, err);
 
       const delegateBtn = document.getElementById('wallet-delegate-btn');
@@ -906,6 +922,13 @@
         .max_tx_size(Number(protocolParams.maxTxSize))
         .max_value_size(Number(protocolParams.maxValueSize));
 
+      const hasUtxoSetter =
+        typeof cfgBuilder.coins_per_utxo_byte === 'function' ||
+        typeof cfgBuilder.coins_per_utxo_word === 'function';
+      if (!hasUtxoSetter) {
+        throw new Error('Loaded CSL build does not expose coins_per_utxo setters required for delegation tx.');
+      }
+
       let utxoCostPerByte = readProtocolParam(
         'utxoCostPerByte',
         'coinsPerUtxoByte',
@@ -933,11 +956,11 @@
       }
 
       let utxoCostWasSet = false;
-      if (cfgBuilder.coins_per_utxo_byte && utxoCostPerByte != null) {
+      if (typeof cfgBuilder.coins_per_utxo_byte === 'function' && utxoCostPerByte != null) {
         cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(Math.trunc(utxoCostPerByte))));
         utxoCostWasSet = true;
       }
-      if (cfgBuilder.coins_per_utxo_word && utxoCostPerWord != null) {
+      if (typeof cfgBuilder.coins_per_utxo_word === 'function' && utxoCostPerWord != null) {
         cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(Math.trunc(utxoCostPerWord))));
         utxoCostWasSet = true;
       }
