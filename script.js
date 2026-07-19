@@ -898,7 +898,6 @@
       delegateBtn.style.display = canDelegate ? '' : 'none';
     }
 
-    if (walletEarnedPanel) walletEarnedPanel.hidden = false;
     if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
     if (walletEarned) {
       calculatePreebRewards(walletState.stakeAddress).then((earned) => {
@@ -910,6 +909,8 @@
     if (walletEpochsStaked) {
       walletEpochsStaked.textContent = formatEpochsStaked(account, currentEpoch);
     }
+
+    if (walletEarnedPanel) walletEarnedPanel.hidden = !delegatedToPreeb;
 
     if (delegatedToPreeb) {
       setWalletStatus('Wallet connected. You are already delegated to PREEB.');
@@ -957,13 +958,13 @@
         renderApyWindows(null);
 
         if (walletGrid) walletGrid.hidden = false;
-        if (walletEarnedPanel) walletEarnedPanel.hidden = false;
         if (walletName) walletName.textContent = walletState.walletLabel || '—';
         if (walletStake) walletStake.textContent = walletState.stakeAddress || '—';
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
         if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
         if (walletEpochsStaked) walletEpochsStaked.textContent = 'Unavailable';
+        if (walletEarnedPanel) walletEarnedPanel.hidden = true;
         walletState.delegationVerified = false;
         if (delegateBtn) {
           const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
