@@ -21,6 +21,9 @@
     months12: 73,
   };
 
+  const DELEGATION_CONFIRMATION_POLLS = 24;
+  const DELEGATION_CONFIRMATION_INTERVAL_MS = 8000;
+
   const SUPPORTED_WALLETS = [
     { keys: ['eternl'], label: 'Eternl' },
     { keys: ['vespr'],  label: 'Vespr' },
@@ -39,6 +42,7 @@
     delegatedPool: null,
     delegatedPoolTicker: null,
     delegationVerified: false,
+    isSyncing: false,
     accountInfo: null,
     apyWindows: null,
   };
@@ -130,6 +134,12 @@
 
   function bytesToHex(bytes) {
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
   }
 
   // Minimal bech32 encoder to convert reward address bytes into stake/stake_test.
@@ -629,6 +639,55 @@
     );
   }
 
+  function setWalletSyncState(isSyncing, message) {
+    walletState.isSyncing = isSyncing;
+
+    const syncEl = document.getElementById('wallet-sync');
+    const syncMsgEl = document.getElementById('wallet-sync-message');
+    const walletGrid = document.getElementById('wallet-grid');
+    const walletActions = document.querySelector('.wallet-actions');
+    const delegateBtn = document.getElementById('wallet-delegate-btn');
+
+    if (syncMsgEl && message) syncMsgEl.textContent = message;
+    if (syncEl) syncEl.hidden = !isSyncing;
+    if (walletGrid && isSyncing) walletGrid.hidden = true;
+    if (walletActions) walletActions.hidden = isSyncing;
+
+    if (delegateBtn && isSyncing) {
+      delegateBtn.hidden = true;
+      delegateBtn.disabled = true;
+      delegateBtn.style.display = 'none';
+    }
+  }
+
+  async function waitForDelegationReflection(previousDelegatedPool, txHash) {
+    for (let attempt = 1; attempt <= DELEGATION_CONFIRMATION_POLLS; attempt += 1) {
+      setWalletStatus(
+        `Tx submitted (${txHash.slice(0, 12)}...). Waiting for on-chain delegation update (${attempt}/${DELEGATION_CONFIRMATION_POLLS})...`
+      );
+
+      try {
+        const account = await loadAccountInfo(walletState.stakeAddress);
+        const delegatedPool = account?.delegated_pool || null;
+        const nowDelegatedToPreeb = isDelegatedToPreeb(delegatedPool, null);
+
+        if (nowDelegatedToPreeb) {
+          return true;
+        }
+
+        if (delegatedPool && delegatedPool !== previousDelegatedPool) {
+          walletState.delegatedPool = delegatedPool;
+        }
+      } catch {
+        // Keep polling through transient index/network errors.
+      }
+
+      await wait(DELEGATION_CONFIRMATION_INTERVAL_MS);
+    }
+
+    return false;
+  }
+
   async function calculatePreebRewards(stakeAddress) {
     const rows = await fetchKoiosJson('/account_rewards', {
       method: 'POST',
@@ -730,7 +789,7 @@
     const walletEarned = document.getElementById('wallet-earned');
     const delegateBtn = document.getElementById('wallet-delegate-btn');
 
-    if (walletGrid) walletGrid.hidden = false;
+    if (walletGrid) walletGrid.hidden = walletState.isSyncing;
     if (walletName) walletName.textContent = walletState.walletLabel || '—';
     if (walletStake) walletStake.textContent = walletState.stakeAddress || '—';
     if (walletDelegatedPool) {
@@ -747,6 +806,7 @@
     const canDelegate = Boolean(
       walletState.api &&
       walletState.stakeAddress &&
+      !walletState.isSyncing &&
       !delegatedToPreeb
     );
     if (delegateBtn) {
@@ -883,6 +943,7 @@
     try {
       setWalletStatus('Building delegation transaction...');
       const csl = await loadCardanoSerializationLib();
+      const previousDelegatedPool = walletState.delegatedPool;
 
       const [protocolParamsRaw, tipRows, account] = await Promise.all([
         fetchKoiosJson('/cli_protocol_params', { headers: { Accept: 'application/json' } }),
@@ -1075,13 +1136,29 @@
       tx = csl.Transaction.new(tx.body(), witnessSet, tx.auxiliary_data());
       setWalletStatus('Submitting transaction...');
       const txHash = await walletState.api.submitTx(bytesToHex(tx.to_bytes()));
+      setWalletSyncState(true, 'Delegation submitted. Waiting for on-chain confirmation...');
 
-      setWalletStatus(`Delegation submitted. Tx hash: ${txHash}`);
+      const reflected = await waitForDelegationReflection(previousDelegatedPool, txHash);
       await refreshWalletState();
+
+      if (!reflected) {
+        setWalletStatus(
+          `Delegation submitted (${txHash.slice(0, 12)}...). Chain index update is delayed; showing latest known data.`
+        );
+      }
     } catch (err) {
       const message = getErrorMessage(err);
       setWalletStatus(`Delegation transaction failed: ${message}`, true);
       console.warn('[PREEB] Delegation tx failed:', message, err);
+    } finally {
+      setWalletSyncState(false);
+      if (walletState.api && walletState.stakeAddress) {
+        try {
+          await refreshWalletState();
+        } catch {
+          // No-op: keep existing UI if post-sync refresh fails.
+        }
+      }
     }
   }
 
@@ -1096,6 +1173,7 @@
       const canDelegate = Boolean(
         walletState.api &&
         walletState.stakeAddress &&
+        !walletState.isSyncing &&
         !delegatedToPreeb
       );
       delegateBtn.hidden = !canDelegate;

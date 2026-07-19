@@ -380,6 +380,11 @@
           Connect a wallet to begin.
         </div>
 
+        <div class="wallet-sync" id="wallet-sync" hidden aria-live="polite" aria-busy="true">
+          <span class="wallet-sync__spinner" aria-hidden="true"></span>
+          <span class="wallet-sync__text" id="wallet-sync-message">Waiting for delegation confirmation on chain...</span>
+        </div>
+
         <div class="wallet-grid" id="wallet-grid" hidden>
           <div class="wallet-stat">
             <span class="wallet-stat__label">Connected Wallet</span>
