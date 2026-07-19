@@ -644,12 +644,14 @@
 
     const syncEl = document.getElementById('wallet-sync');
     const syncMsgEl = document.getElementById('wallet-sync-message');
+    const walletEarnedPanel = document.getElementById('wallet-earned-panel');
     const walletGrid = document.getElementById('wallet-grid');
     const walletActions = document.querySelector('.wallet-actions');
     const delegateBtn = document.getElementById('wallet-delegate-btn');
 
     if (syncMsgEl && message) syncMsgEl.textContent = message;
     if (syncEl) syncEl.hidden = !isSyncing;
+    if (walletEarnedPanel) walletEarnedPanel.hidden = isSyncing;
     if (walletGrid && isSyncing) walletGrid.hidden = true;
     if (walletActions) walletActions.hidden = isSyncing;
 
@@ -757,13 +759,92 @@
     return delegatedBalance * (Number(apyPercent) / 100);
   }
 
+  async function loadAccountRewardsForPool(stakeAddress, poolId) {
+    const rows = await fetchKoiosJson('/account_rewards', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ _stake_addresses: [stakeAddress] }),
+    });
+
+    if (!Array.isArray(rows) || rows.length === 0) return 0;
+    const rewards = Array.isArray(rows[0].rewards) ? rows[0].rewards : [];
+
+    return rewards
+      .filter((entry) => entry.pool_id === poolId && entry.type === 'member')
+      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  }
+
+  function getDelegationStartEpoch(account) {
+    const candidates = [
+      account?.delegated_since,
+      account?.delegated_since_epoch,
+      account?.active_epoch_no,
+      account?.active_epoch,
+      account?.stake_delegation?.active_epoch_no,
+    ];
+
+    for (const value of candidates) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+
+    return null;
+  }
+
+  function formatDelegationDuration(account, currentEpoch) {
+    if (!account?.delegated_pool) return 'Not currently delegated';
+
+    const startEpoch = getDelegationStartEpoch(account);
+    const epochNow = Number(currentEpoch);
+
+    if (!Number.isFinite(startEpoch) || !Number.isFinite(epochNow) || epochNow < startEpoch) {
+      return startEpoch ? `Since epoch ${startEpoch}` : 'Delegated (start epoch unavailable)';
+    }
+
+    const epochs = Math.max(1, Math.floor(epochNow - startEpoch + 1));
+    const approxDays = epochs * 5;
+    const epochLabel = `${epochs} epoch${epochs === 1 ? '' : 's'}`;
+
+    if (approxDays < 30) {
+      return `${epochLabel} (~${approxDays} days)`;
+    }
+
+    if (approxDays < 365) {
+      const months = approxDays / 30.44;
+      return `${epochLabel} (~${months.toFixed(1)} months)`;
+    }
+
+    const years = approxDays / 365;
+    return `${epochLabel} (~${years.toFixed(1)} years)`;
+  }
+
+  function formatEpochsStaked(account, currentEpoch) {
+    const startEpoch = getDelegationStartEpoch(account);
+    const epochNow = Number(currentEpoch);
+
+    if (!account?.delegated_pool) return 'Not currently delegated';
+    if (!Number.isFinite(startEpoch) || !Number.isFinite(epochNow) || epochNow < startEpoch) {
+      return startEpoch ? `${startEpoch} → ${epochNow}` : 'Epoch data unavailable';
+    }
+
+    const epochs = Math.max(1, Math.floor(epochNow - startEpoch + 1));
+    return `${epochs} epoch${epochs === 1 ? '' : 's'}`;
+  }
+
   async function refreshWalletState() {
     if (!walletState.stakeAddress) return;
 
-    const [account, apyWindows] = await Promise.all([
+    const [account, apyWindows, tipRows] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
       loadPoolApyWindows(),
+      fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
     ]);
+
+    const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
+    const currentEpoch = Number(tip?.epoch_no ?? tip?.epoch ?? NaN);
 
     walletState.accountInfo = account;
     walletState.delegatedPool = account?.delegated_pool || null;
@@ -782,11 +863,13 @@
     renderApyWindows(apyWindows);
 
     const walletGrid = document.getElementById('wallet-grid');
+    const walletEarnedPanel = document.getElementById('wallet-earned-panel');
     const walletName = document.getElementById('wallet-name');
     const walletStake = document.getElementById('wallet-stake');
     const walletDelegatedPool = document.getElementById('wallet-delegated-pool');
     const walletEarnedLabel = document.getElementById('wallet-earned-label');
     const walletEarned = document.getElementById('wallet-earned');
+    const walletEpochsStaked = document.getElementById('wallet-epochs-staked');
     const delegateBtn = document.getElementById('wallet-delegate-btn');
 
     if (walletGrid) walletGrid.hidden = walletState.isSyncing;
@@ -815,17 +898,22 @@
       delegateBtn.style.display = canDelegate ? '' : 'none';
     }
 
+    if (walletEarnedPanel) walletEarnedPanel.hidden = false;
+    if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
+    if (walletEarned) {
+      calculatePreebRewards(walletState.stakeAddress).then((earned) => {
+        walletEarned.textContent = formatAdaExact(earned, 2);
+      }).catch(() => {
+        walletEarned.textContent = 'Unavailable';
+      });
+    }
+    if (walletEpochsStaked) {
+      walletEpochsStaked.textContent = formatEpochsStaked(account, currentEpoch);
+    }
+
     if (delegatedToPreeb) {
-      const earned = await calculatePreebRewards(walletState.stakeAddress);
-      if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
-      if (walletEarned) walletEarned.textContent = formatAdaExact(earned, 2);
       setWalletStatus('Wallet connected. You are already delegated to PREEB.');
     } else {
-      const estimate = calculateEstimatedAnnualPreebRewards(account, apyWindows?.months3);
-      if (walletEarnedLabel) {
-        walletEarnedLabel.textContent = 'Estimated Annual Rewards With PREEB (if delegated, based on 3M APY)';
-      }
-      if (walletEarned) walletEarned.textContent = `${formatAdaExact(estimate, 2)} / year`;
       setWalletStatus('Wallet connected. You can build a delegation transaction to PREEB below.');
     }
 
@@ -861,17 +949,21 @@
         const walletName = document.getElementById('wallet-name');
         const walletStake = document.getElementById('wallet-stake');
         const walletDelegatedPool = document.getElementById('wallet-delegated-pool');
+        const walletEarnedPanel = document.getElementById('wallet-earned-panel');
         const walletEarnedLabel = document.getElementById('wallet-earned-label');
         const walletEarned = document.getElementById('wallet-earned');
+        const walletEpochsStaked = document.getElementById('wallet-epochs-staked');
         const delegateBtn = document.getElementById('wallet-delegate-btn');
         renderApyWindows(null);
 
         if (walletGrid) walletGrid.hidden = false;
+        if (walletEarnedPanel) walletEarnedPanel.hidden = false;
         if (walletName) walletName.textContent = walletState.walletLabel || '—';
         if (walletStake) walletStake.textContent = walletState.stakeAddress || '—';
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
-        if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Earned With PREEB';
+        if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
+        if (walletEpochsStaked) walletEpochsStaked.textContent = 'Unavailable';
         walletState.delegationVerified = false;
         if (delegateBtn) {
           const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
