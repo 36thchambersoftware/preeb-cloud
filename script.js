@@ -741,7 +741,6 @@
     const canDelegate = Boolean(
       walletState.api &&
       walletState.stakeAddress &&
-      walletState.delegationVerified &&
       !delegatedToPreeb
     );
     if (delegateBtn) {
@@ -813,7 +812,6 @@
           const canDelegate = Boolean(
             walletState.api &&
             walletState.stakeAddress &&
-            walletState.delegationVerified &&
             !delegatedToPreeb
           );
           delegateBtn.hidden = !canDelegate;
@@ -948,7 +946,31 @@
         throw new Error('Could not determine coins_per_utxo protocol parameter for this network era.');
       }
 
-      const txBuilder = csl.TransactionBuilder.new(cfgBuilder.build());
+      let txConfig;
+      try {
+        txConfig = cfgBuilder.build();
+      } catch (buildErr) {
+        const buildMsg = getErrorMessage(buildErr);
+        if (!/coins_per_utxo_byte|coins_per_utxo_word/i.test(buildMsg)) {
+          throw buildErr;
+        }
+
+        // Some CSL builds still report uninitialized UTxO cost despite setter calls above.
+        // Retry with explicit default era-compatible values before failing.
+        const retryPerByte = Math.trunc(utxoCostPerByte ?? 4310);
+        const retryPerWord = Math.trunc(utxoCostPerWord ?? (retryPerByte * 8));
+
+        if (typeof cfgBuilder.coins_per_utxo_byte === 'function') {
+          cfgBuilder.coins_per_utxo_byte(csl.BigNum.from_str(String(retryPerByte)));
+        }
+        if (typeof cfgBuilder.coins_per_utxo_word === 'function') {
+          cfgBuilder.coins_per_utxo_word(csl.BigNum.from_str(String(retryPerWord)));
+        }
+
+        txConfig = cfgBuilder.build();
+      }
+
+      const txBuilder = csl.TransactionBuilder.new(txConfig);
       const rewardAddress = csl.RewardAddress.from_address(
         csl.Address.from_bytes(hexToBytes(walletState.rewardAddressHex))
       );
@@ -1046,7 +1068,6 @@
       const canDelegate = Boolean(
         walletState.api &&
         walletState.stakeAddress &&
-        walletState.delegationVerified &&
         !delegatedToPreeb
       );
       delegateBtn.hidden = !canDelegate;
