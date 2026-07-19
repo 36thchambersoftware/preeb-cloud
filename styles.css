@@ -1006,6 +1006,40 @@ ul { list-style: none; }
   word-break: break-all;
 }
 
+.wallet-address {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.wallet-address__handles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.wallet-address__fallback {
+  color: var(--color-text);
+}
+
+.wallet-handle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.65rem;
+  border-radius: var(--radius-full);
+  background: rgba(60,200,200,0.14);
+  border: 1px solid rgba(60,200,200,0.28);
+  color: var(--color-text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.wallet-handle-chip__prefix {
+  color: var(--color-cyan);
+}
+
 .wallet-stat--highlight {
   border-color: rgba(60,200,200,0.45);
   box-shadow: inset 0 0 0 1px rgba(60,200,200,0.12);

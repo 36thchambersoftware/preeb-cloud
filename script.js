@@ -39,6 +39,7 @@
     api: null,
     stakeAddress: null,
     rewardAddressHex: null,
+    walletHandles: [],
     delegatedPool: null,
     delegatedPoolTicker: null,
     delegationVerified: false,
@@ -123,6 +124,12 @@
     }
   }
 
+  function normalizeHandleName(name) {
+    const value = String(name || '').trim();
+    if (!value) return '';
+    return value.startsWith('$') ? value : `$${value}`;
+  }
+
   function hexToBytes(hex) {
     if (!hex || typeof hex !== 'string') return new Uint8Array();
     const bytes = new Uint8Array(hex.length / 2);
@@ -134,6 +141,19 @@
 
   function bytesToHex(bytes) {
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function hexAddressToBech32(addressHex) {
+    const csl = await loadCardanoSerializationLib();
+    const address = csl.Address.from_bytes(hexToBytes(addressHex));
+    return address.to_bech32();
+  }
+
+  async function fetchHandleApiJson(path) {
+    const response = await fetchJsonWithTimeout(`https://api.handle.me${path}`, {
+      headers: { Accept: 'application/json' },
+    });
+    return response;
   }
 
   function wait(ms) {
@@ -575,6 +595,85 @@
     return rewardHexToStakeBech32(rewardHex);
   }
 
+  async function getWalletHolderAddresses() {
+    const candidateAddresses = new Set();
+
+    if (walletState.stakeAddress) {
+      candidateAddresses.add(walletState.stakeAddress);
+    }
+
+    const addHexListAsBech32 = async (hexList) => {
+      if (!Array.isArray(hexList)) return;
+
+      for (const addressHex of hexList) {
+        try {
+          const bech32 = await hexAddressToBech32(addressHex);
+          if (bech32) candidateAddresses.add(bech32);
+        } catch {
+          // Ignore individual conversion failures.
+        }
+      }
+    };
+
+    try {
+      if (walletState.api?.getUsedAddresses) {
+        await addHexListAsBech32(await walletState.api.getUsedAddresses());
+      }
+    } catch {
+      // Optional wallet method.
+    }
+
+    try {
+      if (walletState.api?.getUnusedAddresses) {
+        await addHexListAsBech32(await walletState.api.getUnusedAddresses());
+      }
+    } catch {
+      // Optional wallet method.
+    }
+
+    try {
+      if (walletState.api?.getChangeAddress) {
+        await addHexListAsBech32([await walletState.api.getChangeAddress()]);
+      }
+    } catch {
+      // Optional wallet method.
+    }
+
+    return Array.from(candidateAddresses);
+  }
+
+  async function loadWalletHandles() {
+    if (!walletState.api || !walletState.stakeAddress) return [];
+
+    const candidateAddresses = await getWalletHolderAddresses();
+    const handlesByName = new Map();
+
+    for (const address of candidateAddresses) {
+      try {
+        const rows = await fetchHandleApiJson(
+          `/handles?holder_address=${encodeURIComponent(address)}&records_per_page=250`,
+        );
+
+        if (!Array.isArray(rows)) continue;
+
+        for (const row of rows) {
+          const normalizedName = String(row?.name || row?.handle || row || '').trim();
+          if (!normalizedName || handlesByName.has(normalizedName)) continue;
+
+          handlesByName.set(normalizedName, {
+            name: normalizedName,
+            holder: row?.holder || address,
+            image: row?.image || row?.standard_image || null,
+          });
+        }
+      } catch {
+        // Ignore missing holder addresses or temporary API lag.
+      }
+    }
+
+    return Array.from(handlesByName.values());
+  }
+
   async function loadAccountInfo(stakeAddress) {
     const rows = await fetchKoiosJson('/account_info', {
       method: 'POST',
@@ -837,16 +936,18 @@
   async function refreshWalletState() {
     if (!walletState.stakeAddress) return;
 
-    const [account, apyWindows, tipRows] = await Promise.all([
+    const [account, apyWindows, tipRows, walletHandles] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
       loadPoolApyWindows(),
       fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
+      loadWalletHandles(),
     ]);
 
     const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
     const currentEpoch = Number(tip?.epoch_no ?? tip?.epoch ?? NaN);
 
     walletState.accountInfo = account;
+    walletState.walletHandles = walletHandles;
     walletState.delegatedPool = account?.delegated_pool || null;
     walletState.delegationVerified = true;
 
@@ -865,7 +966,8 @@
     const walletGrid = document.getElementById('wallet-grid');
     const walletEarnedPanel = document.getElementById('wallet-earned-panel');
     const walletName = document.getElementById('wallet-name');
-    const walletStake = document.getElementById('wallet-stake');
+    const walletAddressHandles = document.getElementById('wallet-address-handles');
+    const walletAddressFallback = document.getElementById('wallet-address-fallback');
     const walletDelegatedPool = document.getElementById('wallet-delegated-pool');
     const walletEarnedLabel = document.getElementById('wallet-earned-label');
     const walletEarned = document.getElementById('wallet-earned');
@@ -874,7 +976,26 @@
 
     if (walletGrid) walletGrid.hidden = walletState.isSyncing;
     if (walletName) walletName.textContent = walletState.walletLabel || '—';
-    if (walletStake) walletStake.textContent = walletState.stakeAddress || '—';
+    if (walletAddressFallback) walletAddressFallback.textContent = walletState.stakeAddress || '—';
+    if (walletAddressHandles) {
+      const handles = Array.isArray(walletHandles) ? walletHandles : [];
+      walletAddressHandles.innerHTML = '';
+      walletAddressHandles.hidden = handles.length === 0;
+
+      for (const handle of handles) {
+        const chip = document.createElement('span');
+        chip.className = 'wallet-handle-chip';
+        chip.title = handle.holder ? `Holder: ${handle.holder}` : '';
+        const label = normalizeHandleName(handle.name);
+        const prefix = document.createElement('span');
+        prefix.className = 'wallet-handle-chip__prefix';
+        prefix.textContent = '$';
+        const text = document.createElement('span');
+        text.textContent = label.replace(/^\$/, '');
+        chip.append(prefix, text);
+        walletAddressHandles.appendChild(chip);
+      }
+    }
     if (walletDelegatedPool) {
       if (walletState.delegatedPoolTicker) {
         walletDelegatedPool.textContent = walletState.delegatedPoolTicker;
@@ -949,8 +1070,9 @@
         await refreshWalletState();
       } catch (networkErr) {
         const walletGrid = document.getElementById('wallet-grid');
+        const walletAddressHandles = document.getElementById('wallet-address-handles');
+        const walletAddressFallback = document.getElementById('wallet-address-fallback');
         const walletName = document.getElementById('wallet-name');
-        const walletStake = document.getElementById('wallet-stake');
         const walletDelegatedPool = document.getElementById('wallet-delegated-pool');
         const walletEarnedPanel = document.getElementById('wallet-earned-panel');
         const walletEarnedLabel = document.getElementById('wallet-earned-label');
@@ -961,7 +1083,8 @@
 
         if (walletGrid) walletGrid.hidden = false;
         if (walletName) walletName.textContent = walletState.walletLabel || '—';
-        if (walletStake) walletStake.textContent = walletState.stakeAddress || '—';
+        if (walletAddressHandles) walletAddressHandles.hidden = true;
+        if (walletAddressFallback) walletAddressFallback.textContent = walletState.stakeAddress || '—';
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
         if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
@@ -1048,7 +1171,8 @@
 
       const protocolParams = Array.isArray(protocolParamsRaw) ? protocolParamsRaw[0] : protocolParamsRaw;
       if (!protocolParams || typeof protocolParams !== 'object') {
-        throw new Error('Invalid protocol parameters response from Koios');
+        if (walletAddressHandles) walletAddressHandles.hidden = true;
+        if (walletAddressFallback) walletAddressFallback.textContent = walletState.stakeAddress || '—';
       }
 
       const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
