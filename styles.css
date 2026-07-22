@@ -898,6 +898,17 @@ ul { list-style: none; }
   font-size: 0.95rem;
 }
 
+.wallet-panel__top p a {
+  color: var(--color-cyan);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.wallet-panel__top p a:hover {
+  color: #7ddede;
+  text-decoration: none;
+}
+
 .wallet-buttons {
   display: flex;
   gap: var(--space-sm);
