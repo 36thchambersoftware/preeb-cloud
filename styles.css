@@ -1215,6 +1215,8 @@ ul { list-style: none; }
   background: rgba(60,200,200,0.1);
   color: var(--color-text);
   font-size: 0.9rem;
+  flex-wrap: wrap;
+  row-gap: 0.35rem;
 }
 
 .wallet-role-chip--muted {
@@ -1225,6 +1227,7 @@ ul { list-style: none; }
 
 .wallet-role-chip__name {
   font-weight: 600;
+  flex: 1 1 auto;
 }
 
 .wallet-role-chip__value {
@@ -1232,6 +1235,8 @@ ul { list-style: none; }
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .wallet-actions {
