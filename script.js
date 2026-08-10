@@ -1088,9 +1088,8 @@
 
     summary.innerHTML = `Your connected wallet shows <strong>${adaText}</strong> and <strong>${nftText}</strong> in the wallet. Every role is shown below so you can see what is already unlocked and what is still ahead.`;
 
-    const buildRoleList = (roles, thresholdValue, type) => {
-      const list = document.createElement('ul');
-      list.className = 'wallet-roles__list';
+    const buildRoleList = (listEl, roles, type) => {
+      listEl.innerHTML = '';
 
       roles.forEach((role) => {
         const isUnlocked = type === 'ada'
@@ -1124,14 +1123,12 @@
           `;
         }
 
-        list.appendChild(item);
+        listEl.appendChild(item);
       });
-
-      return list;
     };
 
-    delegatorList.replaceWith(buildRoleList(DELEGATOR_ROLES, adaBalance, 'ada'));
-    flowmassList.replaceWith(buildRoleList(FLOWMASS_ROLES, flowmassCount, 'flowmass'));
+    buildRoleList(delegatorList, DELEGATOR_ROLES, 'ada');
+    buildRoleList(flowmassList, FLOWMASS_ROLES, 'flowmass');
 
     panel.hidden = false;
   }
