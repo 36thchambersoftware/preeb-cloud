@@ -30,6 +30,22 @@
     { keys: ['typhoncip30', 'typhon'], label: 'Typhon' },
     { keys: ['lace'],   label: 'Lace' },
   ];
+  const FLOWMASS_POLICY_ID = '1d0cf168b30d27c6619e7ca7c18e02c8cebc011bf056216a1ea829ff';
+  const DELEGATOR_ROLES = [
+    { name: '@Delegator', thresholdAda: 1 },
+    { name: '@PANDA', thresholdAda: 500 },
+    { name: '@BLACK BEAR', thresholdAda: 1000 },
+    { name: '@GRIZZLY BEAR', thresholdAda: 2500 },
+    { name: '@POLAR BEAR', thresholdAda: 5000 },
+    { name: '@CARE BEAR', thresholdAda: 50000 },
+  ];
+  const FLOWMASS_ROLES = [
+    { name: '@SHARK BAIT', thresholdCount: 1 },
+    { name: '@SHARK WEEK', thresholdCount: 7 },
+    { name: '@JAWESOME', thresholdCount: 15 },
+    { name: '@SHARK TANK', thresholdCount: 20 },
+    { name: '@SHARKNADO', thresholdCount: 40 },
+  ];
 
   let CSL = null;
 
@@ -807,6 +823,120 @@
       .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
   }
 
+  async function countFlowmassNfts() {
+    if (!walletState.api?.getUtxos) return 0;
+
+    try {
+      const utxos = await walletState.api.getUtxos();
+      if (!Array.isArray(utxos) || utxos.length === 0) return 0;
+
+      const csl = await loadCardanoSerializationLib();
+      let total = 0;
+
+      for (const utxoHex of utxos) {
+        try {
+          const utxo = csl.TransactionUnspentOutput.from_bytes(hexToBytes(utxoHex));
+          const value = utxo.output().amount();
+          const multiAsset = value.multi_asset();
+          if (!multiAsset) continue;
+
+          const policyIds = multiAsset.keys();
+          for (let i = 0; i < policyIds.len(); i += 1) {
+            const policyId = policyIds.get(i);
+            const policyHex = policyId?.to_hex ? policyId.to_hex() : String(policyId || '');
+            if (policyHex !== FLOWMASS_POLICY_ID) continue;
+
+            const assets = multiAsset.get(policyId);
+            if (!assets) continue;
+
+            const assetNames = assets.keys();
+            for (let j = 0; j < assetNames.len(); j += 1) {
+              const assetName = assetNames.get(j);
+              const quantity = assets.get(assetName);
+              const rawQty = quantity?.to_str ? quantity.to_str() : quantity?.toString?.() || '0';
+              total += Number(rawQty || 0);
+            }
+          }
+        } catch (innerErr) {
+          console.warn('[PREEB] Could not inspect Flowmass NFT holdings:', getErrorMessage(innerErr));
+        }
+      }
+
+      return total;
+    } catch (err) {
+      console.warn('[PREEB] Could not inspect wallet NFT holdings:', getErrorMessage(err));
+      return 0;
+    }
+  }
+
+  function renderWalletRoleEligibility(eligibility) {
+    const panel = document.getElementById('wallet-roles-panel');
+    const summary = document.getElementById('wallet-role-summary');
+    const delegatorList = document.getElementById('wallet-delegator-roles');
+    const flowmassList = document.getElementById('wallet-flowmass-roles');
+
+    if (!panel || !summary || !delegatorList || !flowmassList) return;
+
+    if (!eligibility) {
+      panel.hidden = true;
+      return;
+    }
+
+    const { adaBalance, flowmassCount, delegatorRoles, flowmassRoles } = eligibility;
+    const adaText = formatAdaExact(adaBalance, 2);
+    const nftText = flowmassCount > 0
+      ? `${flowmassCount} Flowmass NFT${flowmassCount === 1 ? '' : 's'}`
+      : 'no Flowmass NFTs';
+
+    summary.innerHTML = `Your connected wallet shows <strong>${adaText}</strong> and <strong>${nftText}</strong> in the wallet. These are the roles you currently qualify for.`;
+
+    delegatorList.innerHTML = '';
+    if (delegatorRoles.length > 0) {
+      delegatorRoles.forEach((role) => {
+        const item = document.createElement('li');
+        item.className = 'wallet-role-chip';
+        item.innerHTML = `<span class="wallet-role-chip__name">${role.name}</span><span class="wallet-role-chip__value">${role.thresholdAda === 1 ? '1 ₳+' : `${role.thresholdAda.toLocaleString()} ₳+`}</span>`;
+        delegatorList.appendChild(item);
+      });
+    } else {
+      const item = document.createElement('li');
+      item.className = 'wallet-role-chip wallet-role-chip--muted';
+      item.textContent = 'No delegator roles yet';
+      delegatorList.appendChild(item);
+    }
+
+    flowmassList.innerHTML = '';
+    if (flowmassRoles.length > 0) {
+      flowmassRoles.forEach((role) => {
+        const item = document.createElement('li');
+        item.className = 'wallet-role-chip';
+        item.innerHTML = `<span class="wallet-role-chip__name">${role.name}</span><span class="wallet-role-chip__value">${role.thresholdCount}+ NFT${role.thresholdCount === 1 ? '' : 's'}</span>`;
+        flowmassList.appendChild(item);
+      });
+    } else {
+      const item = document.createElement('li');
+      item.className = 'wallet-role-chip wallet-role-chip--muted';
+      item.textContent = 'No Flowmass roles yet';
+      flowmassList.appendChild(item);
+    }
+
+    panel.hidden = false;
+  }
+
+  async function loadWalletRoleEligibility() {
+    const adaBalance = Number(walletState.accountInfo?.total_balance || walletState.accountInfo?.utxo || 0);
+    const flowmassCount = await countFlowmassNfts();
+    const delegatorRoles = DELEGATOR_ROLES.filter((role) => adaBalance >= role.thresholdAda * 1_000_000);
+    const flowmassRoles = FLOWMASS_ROLES.filter((role) => flowmassCount >= role.thresholdCount);
+
+    renderWalletRoleEligibility({
+      adaBalance,
+      flowmassCount,
+      delegatorRoles,
+      flowmassRoles,
+    });
+  }
+
   async function loadPoolApyWindows() {
     if (walletState.apyWindows) return walletState.apyWindows;
 
@@ -962,6 +1092,7 @@
     }
 
     renderApyWindows(apyWindows);
+    await loadWalletRoleEligibility();
 
     const walletGrid = document.getElementById('wallet-grid');
     const walletEarnedPanel = document.getElementById('wallet-earned-panel');
@@ -1080,6 +1211,7 @@
         const walletEpochsStaked = document.getElementById('wallet-epochs-staked');
         const delegateBtn = document.getElementById('wallet-delegate-btn');
         renderApyWindows(null);
+        renderWalletRoleEligibility(null);
 
         if (walletGrid) walletGrid.hidden = false;
         if (walletName) walletName.textContent = walletState.walletLabel || '—';
@@ -1111,6 +1243,7 @@
       }
     } catch (err) {
       walletState.delegationVerified = false;
+      renderWalletRoleEligibility(null);
       const message = getErrorMessage(err);
       if (/not implemented/i.test(message)) {
         setWalletStatus(

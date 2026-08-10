@@ -378,6 +378,19 @@
         <p class="section__subtitle">Connect a Cardano wallet, check your delegation status, and build a delegation transaction to PREEB with on-chain metadata.</p>
       </div>
 
+      <div class="wallet-callout" role="note">
+        <div class="wallet-callout__icon" aria-hidden="true">✦</div>
+        <div>
+          <h3>Delegators who join Discord can receive more value</h3>
+          <p>
+            Delegators who participate in our Discord community can unlock extra value beyond staking alone,
+            including airdrops, tips, and other giveaways.
+            <a href="https://discord.gg/nN5xb7zH7d" target="_blank" rel="noopener">Join the Discord</a>
+            to stay in the loop.
+          </p>
+        </div>
+      </div>
+
       <div class="wallet-panel">
         <div class="wallet-panel__top">
           <div>
@@ -442,6 +455,25 @@
           <div class="wallet-stat">
             <span class="wallet-stat__label">APY (Last 12 Months)</span>
             <span class="wallet-stat__value" id="wallet-apy-12m">—</span>
+          </div>
+        </div>
+
+        <div class="wallet-roles" id="wallet-roles-panel" hidden>
+          <div class="wallet-roles__header">
+            <h3>Your available PREEB roles</h3>
+            <p id="wallet-role-summary">
+              Based on your connected wallet balance and any Flowmass NFTs you hold, these are the roles you currently qualify for.
+            </p>
+          </div>
+          <div class="wallet-roles__grid">
+            <div class="wallet-roles__group">
+              <h4>Delegator roles</h4>
+              <ul class="wallet-roles__list" id="wallet-delegator-roles"></ul>
+            </div>
+            <div class="wallet-roles__group">
+              <h4>Flowmass roles</h4>
+              <ul class="wallet-roles__list" id="wallet-flowmass-roles"></ul>
+            </div>
           </div>
         </div>
 
