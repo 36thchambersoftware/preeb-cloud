@@ -1080,43 +1080,58 @@
       return;
     }
 
-    const { adaBalance, flowmassCount, delegatorRoles, flowmassRoles } = eligibility;
+    const { adaBalance, flowmassCount } = eligibility;
     const adaText = formatAdaExact(adaBalance, 2);
     const nftText = flowmassCount > 0
       ? `${flowmassCount} Flowmass NFT${flowmassCount === 1 ? '' : 's'}`
       : 'no Flowmass NFTs';
 
-    summary.innerHTML = `Your connected wallet shows <strong>${adaText}</strong> and <strong>${nftText}</strong> in the wallet. These are the roles you currently qualify for.`;
+    summary.innerHTML = `Your connected wallet shows <strong>${adaText}</strong> and <strong>${nftText}</strong> in the wallet. Every role is shown below so you can see what is already unlocked and what is still ahead.`;
 
-    delegatorList.innerHTML = '';
-    if (delegatorRoles.length > 0) {
-      delegatorRoles.forEach((role) => {
-        const item = document.createElement('li');
-        item.className = 'wallet-role-chip';
-        item.innerHTML = `<span class="wallet-role-chip__name">${role.name}</span><span class="wallet-role-chip__value">${role.thresholdAda === 1 ? '1 ₳+' : `${role.thresholdAda.toLocaleString()} ₳+`}</span>`;
-        delegatorList.appendChild(item);
-      });
-    } else {
-      const item = document.createElement('li');
-      item.className = 'wallet-role-chip wallet-role-chip--muted';
-      item.textContent = 'No delegator roles yet';
-      delegatorList.appendChild(item);
-    }
+    const buildRoleList = (roles, thresholdValue, type) => {
+      const list = document.createElement('ul');
+      list.className = 'wallet-roles__list';
 
-    flowmassList.innerHTML = '';
-    if (flowmassRoles.length > 0) {
-      flowmassRoles.forEach((role) => {
+      roles.forEach((role) => {
+        const isUnlocked = type === 'ada'
+          ? adaBalance >= role.thresholdAda * 1_000_000
+          : flowmassCount >= role.thresholdCount;
+
         const item = document.createElement('li');
-        item.className = 'wallet-role-chip';
-        item.innerHTML = `<span class="wallet-role-chip__name">${role.name}</span><span class="wallet-role-chip__value">${role.thresholdCount}+ NFT${role.thresholdCount === 1 ? '' : 's'}</span>`;
-        flowmassList.appendChild(item);
+        item.className = `wallet-role-chip${isUnlocked ? '' : ' wallet-role-chip--muted'}`;
+
+        if (type === 'ada') {
+          const neededAda = Math.max(0, role.thresholdAda * 1_000_000 - adaBalance);
+          const neededText = isUnlocked
+            ? 'Unlocked'
+            : neededAda >= 1_000_000
+              ? `${formatAdaExact(neededAda, 0)} more to unlock`
+              : `${neededAda.toLocaleString()} lovelace more to unlock`;
+
+          item.innerHTML = `
+            <span class="wallet-role-chip__name">${role.name}</span>
+            <span class="wallet-role-chip__value">${isUnlocked ? 'Unlocked' : neededText}</span>
+          `;
+        } else {
+          const neededCount = Math.max(0, role.thresholdCount - flowmassCount);
+          const neededText = isUnlocked
+            ? 'Unlocked'
+            : `${neededCount} more NFT${neededCount === 1 ? '' : 's'} to unlock`;
+
+          item.innerHTML = `
+            <span class="wallet-role-chip__name">${role.name}</span>
+            <span class="wallet-role-chip__value">${isUnlocked ? 'Unlocked' : neededText}</span>
+          `;
+        }
+
+        list.appendChild(item);
       });
-    } else {
-      const item = document.createElement('li');
-      item.className = 'wallet-role-chip wallet-role-chip--muted';
-      item.textContent = 'No Flowmass roles yet';
-      flowmassList.appendChild(item);
-    }
+
+      return list;
+    };
+
+    delegatorList.replaceWith(buildRoleList(DELEGATOR_ROLES, adaBalance, 'ada'));
+    flowmassList.replaceWith(buildRoleList(FLOWMASS_ROLES, flowmassCount, 'flowmass'));
 
     panel.hidden = false;
   }
@@ -1124,14 +1139,10 @@
   async function loadWalletRoleEligibility() {
     const adaBalance = Number(walletState.accountInfo?.total_balance || walletState.accountInfo?.utxo || 0);
     const flowmassCount = await countFlowmassNfts();
-    const delegatorRoles = DELEGATOR_ROLES.filter((role) => adaBalance >= role.thresholdAda * 1_000_000);
-    const flowmassRoles = FLOWMASS_ROLES.filter((role) => flowmassCount >= role.thresholdCount);
 
     renderWalletRoleEligibility({
       adaBalance,
       flowmassCount,
-      delegatorRoles,
-      flowmassRoles,
     });
   }
 
