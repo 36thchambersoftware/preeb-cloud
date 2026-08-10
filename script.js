@@ -851,6 +851,17 @@
     return Number(value) || 0;
   }
 
+  function countFlowmassNftsFromAssetRows(assetRows, normalizedPolicy) {
+    if (!Array.isArray(assetRows)) return 0;
+
+    return assetRows.reduce((sum, entry) => {
+      if (!entry || typeof entry !== 'object') return sum;
+      const policy = normalizePolicyId(entry.policy_id || entry.policyId || entry.policy || entry.unit?.split('.')[0]);
+      if (policy !== normalizedPolicy) return sum;
+      return sum + normalizeAssetQuantity(entry.quantity || entry.qty || entry.amount || entry.count || 1);
+    }, 0);
+  }
+
   function countFlowmassNftsFromAssetMap(assetMap, normalizedPolicy) {
     if (!assetMap) return 0;
 
@@ -954,7 +965,43 @@
     return 0;
   }
 
+  async function loadWalletAssetRows() {
+    if (!walletState.stakeAddress) return [];
+
+    try {
+      const rows = await fetchKoiosJson('/account_assets', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ _stake_addresses: [walletState.stakeAddress] }),
+      });
+
+      if (!Array.isArray(rows) || rows.length === 0) return [];
+
+      const first = rows[0] || {};
+      if (Array.isArray(first.asset_list)) return first.asset_list;
+      if (Array.isArray(first.assets)) return first.assets;
+      if (Array.isArray(first)) return first;
+      return [];
+    } catch (err) {
+      console.warn('[PREEB] Could not load wallet asset list from Koios:', getErrorMessage(err));
+      return [];
+    }
+  }
+
   async function countFlowmassNfts() {
+    const normalizedPolicy = normalizePolicyId(FLOWMASS_POLICY_ID);
+
+    try {
+      const koiosAssets = await loadWalletAssetRows();
+      const koiosCount = countFlowmassNftsFromAssetRows(koiosAssets, normalizedPolicy);
+      if (koiosCount > 0) return koiosCount;
+    } catch (err) {
+      console.warn('[PREEB] Could not inspect wallet NFT holdings from Koios:', getErrorMessage(err));
+    }
+
     if (!walletState.api?.getUtxos) return 0;
 
     try {
@@ -962,7 +1009,6 @@
       if (!Array.isArray(utxos) || utxos.length === 0) return 0;
 
       let total = 0;
-      const normalizedPolicy = normalizePolicyId(FLOWMASS_POLICY_ID);
       let csl = null;
 
       try {
