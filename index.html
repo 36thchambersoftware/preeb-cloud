@@ -420,18 +420,45 @@
           <span class="wallet-spotlight__value" id="wallet-earned">—</span>
         </div>
 
-        <div class="wallet-grid" id="wallet-grid" hidden>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">Connected Wallet</span>
-            <span class="wallet-stat__value" id="wallet-name">—</span>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">Address</span>
-            <div class="wallet-address" id="wallet-stake">
-              <div class="wallet-address__handles" id="wallet-address-handles" hidden></div>
-              <div class="wallet-address__fallback wallet-stat__mono" id="wallet-address-fallback">—</div>
+        <div class="wallet-layout" id="wallet-grid" hidden>
+          <div class="wallet-info-grid">
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">Connected Wallet</span>
+              <span class="wallet-stat__value" id="wallet-name">—</span>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">Address</span>
+              <div class="wallet-address" id="wallet-stake">
+                <div class="wallet-address__handles" id="wallet-address-handles" hidden></div>
+                <div class="wallet-address__fallback wallet-stat__mono" id="wallet-address-fallback">—</div>
+              </div>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">Delegated Pool</span>
+              <span class="wallet-stat__value wallet-stat__mono" id="wallet-delegated-pool">—</span>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">Epochs Staked To Current Pool</span>
+              <span class="wallet-stat__value" id="wallet-epochs-staked">—</span>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">APY (Last 3 Epochs)</span>
+              <span class="wallet-stat__value" id="wallet-apy-3e">—</span>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">APY (Last 3 Months)</span>
+              <span class="wallet-stat__value" id="wallet-apy-3m">—</span>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">APY (Last 6 Months)</span>
+              <span class="wallet-stat__value" id="wallet-apy-6m">—</span>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">APY (Last 12 Months)</span>
+              <span class="wallet-stat__value" id="wallet-apy-12m">—</span>
             </div>
           </div>
+
           <div class="wallet-roles" id="wallet-roles-panel" hidden>
             <div class="wallet-roles__header">
               <h3>Your available PREEB roles</h3>
@@ -448,48 +475,6 @@
                 <h4>Flowmass roles</h4>
                 <ul class="wallet-roles__list" id="wallet-flowmass-roles"></ul>
               </div>
-            </div>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">Delegated Pool</span>
-            <span class="wallet-stat__value wallet-stat__mono" id="wallet-delegated-pool">—</span>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">Epochs Staked To Current Pool</span>
-            <span class="wallet-stat__value" id="wallet-epochs-staked">—</span>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">APY (Last 3 Epochs)</span>
-            <span class="wallet-stat__value" id="wallet-apy-3e">—</span>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">APY (Last 3 Months)</span>
-            <span class="wallet-stat__value" id="wallet-apy-3m">—</span>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">APY (Last 6 Months)</span>
-            <span class="wallet-stat__value" id="wallet-apy-6m">—</span>
-          </div>
-          <div class="wallet-stat">
-            <span class="wallet-stat__label">APY (Last 12 Months)</span>
-            <span class="wallet-stat__value" id="wallet-apy-12m">—</span>
-          </div>
-        </div>
-
-          <div class="wallet-roles__header">
-            <h3>Your available PREEB roles</h3>
-            <p id="wallet-role-summary">
-              Based on your connected wallet balance and any Flowmass NFTs you hold, these are the roles you currently qualify for.
-            </p>
-          </div>
-          <div class="wallet-roles__grid">
-            <div class="wallet-roles__group">
-              <h4>Delegator roles</h4>
-              <ul class="wallet-roles__list" id="wallet-delegator-roles"></ul>
-            </div>
-            <div class="wallet-roles__group">
-              <h4>Flowmass roles</h4>
-              <ul class="wallet-roles__list" id="wallet-flowmass-roles"></ul>
             </div>
           </div>
         </div>

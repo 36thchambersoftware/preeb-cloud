@@ -1027,9 +1027,16 @@ ul { list-style: none; }
   to { transform: rotate(360deg); }
 }
 
-.wallet-grid {
+.wallet-layout {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  gap: var(--space-md);
+  align-items: start;
+}
+
+.wallet-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-md);
   align-items: start;
 }
@@ -1170,7 +1177,11 @@ ul { list-style: none; }
 }
 
 @media (max-width: 980px) {
-  .wallet-grid {
+  .wallet-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-info-grid {
     grid-template-columns: 1fr;
   }
 }
