@@ -851,20 +851,33 @@
     return Number(value) || 0;
   }
 
+  function getAssetPolicyId(entry) {
+    if (!entry || typeof entry !== 'object') return '';
+
+    const unit = entry.unit || entry.asset_id || entry.assetId || entry.asset || entry.asset_name || entry.name || '';
+    if (typeof unit === 'string' && unit.includes('.')) {
+      return normalizePolicyId(unit.split('.')[0]);
+    }
+
+    return normalizePolicyId(entry.policy_id || entry.policyId || entry.policy || entry.asset_policy || entry.assetPolicy || '');
+  }
+
+  function getAssetQuantityValue(entry) {
+    if (!entry || typeof entry !== 'object') return 0;
+
+    const quantityValue = entry.quantity || entry.qty || entry.amount || entry.count || entry.balance || entry.total || entry.value || 1;
+    return normalizeAssetQuantity(quantityValue);
+  }
+
   function countFlowmassNftsFromAssetRows(assetRows, normalizedPolicy) {
     if (!Array.isArray(assetRows)) return 0;
 
     return assetRows.reduce((sum, entry) => {
       if (!entry || typeof entry !== 'object') return sum;
 
-      const unit = entry.unit || entry.asset_id || entry.assetId || entry.asset || entry.asset_name || entry.name || '';
-      const policyFromUnit = typeof unit === 'string' && unit.includes('.')
-        ? normalizePolicyId(unit.split('.')[0])
-        : normalizePolicyId(entry.policy_id || entry.policyId || entry.policy || '');
-      const quantityValue = entry.quantity || entry.qty || entry.amount || entry.count || entry.balance || entry.total || 1;
-
-      if (policyFromUnit !== normalizedPolicy) return sum;
-      return sum + normalizeAssetQuantity(quantityValue);
+      const policyFromEntry = getAssetPolicyId(entry);
+      if (policyFromEntry !== normalizedPolicy) return sum;
+      return sum + getAssetQuantityValue(entry);
     }, 0);
   }
 
@@ -873,12 +886,9 @@
 
     if (Array.isArray(assetMap)) {
       return assetMap.reduce((sum, entry) => {
-        const unit = entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || entry?.asset_name || entry?.name || '';
-        const policy = typeof unit === 'string' && unit.includes('.')
-          ? normalizePolicyId(unit.split('.')[0])
-          : normalizePolicyId(entry?.policyId || entry?.policy_id || entry?.policy || '');
+        const policy = getAssetPolicyId(entry);
         if (policy !== normalizedPolicy) return sum;
-        return sum + normalizeAssetQuantity(entry?.quantity || entry?.qty || entry?.amount || entry?.count || entry?.balance || entry?.total || 1);
+        return sum + getAssetQuantityValue(entry);
       }, 0);
     }
 
@@ -987,13 +997,23 @@
         body: JSON.stringify({ _stake_addresses: [walletState.stakeAddress] }),
       });
 
-      if (!Array.isArray(rows) || rows.length === 0) return [];
+      if (!Array.isArray(rows)) {
+        const nestedCandidates = [rows?.asset_list, rows?.assets, rows?.assetRows, rows?.data, rows?.result, rows?.rows];
+        for (const candidate of nestedCandidates) {
+          if (Array.isArray(candidate)) return candidate;
+        }
+        return [];
+      }
 
-      const first = rows[0] || {};
-      if (Array.isArray(first.asset_list)) return first.asset_list;
-      if (Array.isArray(first.assets)) return first.assets;
-      if (Array.isArray(first)) return first;
-      return [];
+      if (rows.length === 0) return [];
+
+      for (const row of rows) {
+        if (Array.isArray(row?.asset_list)) return row.asset_list;
+        if (Array.isArray(row?.assets)) return row.assets;
+        if (Array.isArray(row)) return row;
+      }
+
+      return rows.filter((entry) => entry && typeof entry === 'object' && (entry.policy_id || entry.policyId || entry.policy || entry.unit || entry.asset_name || entry.assetName));
     } catch (err) {
       console.warn('[PREEB] Could not load wallet asset list from Koios:', getErrorMessage(err));
       return [];
@@ -1009,6 +1029,16 @@
       if (koiosCount > 0) return koiosCount;
     } catch (err) {
       console.warn('[PREEB] Could not inspect wallet NFT holdings from Koios:', getErrorMessage(err));
+    }
+
+    if (walletState.api?.getAssets) {
+      try {
+        const walletAssets = await walletState.api.getAssets();
+        const walletAssetCount = countFlowmassNftsFromAssetMap(walletAssets, normalizedPolicy);
+        if (walletAssetCount > 0) return walletAssetCount;
+      } catch (err) {
+        console.warn('[PREEB] Could not inspect wallet asset map:', getErrorMessage(err));
+      }
     }
 
     if (!walletState.api?.getUtxos) return 0;
