@@ -1216,17 +1216,15 @@ ul { list-style: none; }
 
 .wallet-role-chip {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-sm);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
   padding: 0.7rem 0.85rem;
   border-radius: var(--radius-full);
   border: 1px solid rgba(60,200,200,0.24);
   background: rgba(60,200,200,0.1);
   color: var(--color-text);
   font-size: 0.9rem;
-  flex-wrap: wrap;
-  row-gap: 0.35rem;
 }
 
 .wallet-role-chip--muted {
@@ -1237,16 +1235,17 @@ ul { list-style: none; }
 
 .wallet-role-chip__name {
   font-weight: 600;
-  flex: 1 1 auto;
+  line-height: 1.3;
 }
 
 .wallet-role-chip__value {
   color: var(--color-cyan);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  text-align: right;
-  flex-shrink: 0;
+  text-align: left;
+  opacity: 0.95;
 }
 
 .wallet-actions {
