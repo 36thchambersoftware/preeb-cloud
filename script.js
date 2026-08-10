@@ -823,6 +823,137 @@
       .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
   }
 
+  function normalizePolicyId(value) {
+    return String(value || '').trim().replace(/^0x/i, '').toLowerCase();
+  }
+
+  function normalizeAssetQuantity(value) {
+    if (value == null) return 0;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'bigint') return Number(value);
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return 0;
+      if (/^\d+$/.test(trimmed)) return Number(trimmed);
+      const match = trimmed.match(/(\d+)/);
+      return match ? Number(match[1]) : 0;
+    }
+    if (typeof value === 'object' && value !== null) {
+      if (typeof value.quantity === 'number') return value.quantity;
+      if (typeof value.qty === 'number') return value.qty;
+      if (typeof value.amount === 'number') return value.amount;
+      if (typeof value.count === 'number') return value.count;
+      if (typeof value.coin === 'number') return value.coin;
+      if (typeof value.quantity === 'string') return normalizeAssetQuantity(value.quantity);
+      if (typeof value.qty === 'string') return normalizeAssetQuantity(value.qty);
+      if (typeof value.amount === 'string') return normalizeAssetQuantity(value.amount);
+    }
+    return Number(value) || 0;
+  }
+
+  function countFlowmassNftsFromAssetMap(assetMap, normalizedPolicy) {
+    if (!assetMap) return 0;
+
+    if (Array.isArray(assetMap)) {
+      return assetMap.reduce((sum, entry) => {
+        const policy = normalizePolicyId(entry?.policyId || entry?.policy_id || entry?.policy || entry?.unit?.split('.')[0]);
+        if (policy !== normalizedPolicy) return sum;
+        return sum + normalizeAssetQuantity(entry?.quantity || entry?.qty || entry?.amount || entry?.count || 1);
+      }, 0);
+    }
+
+    if (assetMap instanceof Map) {
+      let total = 0;
+      assetMap.forEach((value, policy) => {
+        if (normalizePolicyId(policy) !== normalizedPolicy) return;
+        if (value && typeof value === 'object') {
+          Object.values(value).forEach((assetValue) => {
+            total += normalizeAssetQuantity(assetValue);
+          });
+        } else {
+          total += normalizeAssetQuantity(value);
+        }
+      });
+      return total;
+    }
+
+    let total = 0;
+    Object.entries(assetMap).forEach(([policy, value]) => {
+      if (normalizePolicyId(policy) !== normalizedPolicy) return;
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        Object.values(value).forEach((assetValue) => {
+          total += normalizeAssetQuantity(assetValue);
+        });
+      } else {
+        total += normalizeAssetQuantity(value);
+      }
+    });
+    return total;
+  }
+
+  function countFlowmassNftsFromUtxo(utxo, csl, normalizedPolicy) {
+    if (!utxo) return 0;
+
+    if (typeof utxo === 'string') {
+      if (!csl) return 0;
+      try {
+        const parsedUtxo = csl.TransactionUnspentOutput.from_bytes(hexToBytes(utxo));
+        const value = parsedUtxo.output().amount();
+        const multiAsset = value.multi_asset();
+        if (!multiAsset) return 0;
+
+        let total = 0;
+        const policyIds = multiAsset.keys();
+        for (let i = 0; i < policyIds.len(); i += 1) {
+          const policyId = policyIds.get(i);
+          const policyHex = policyId?.to_hex ? policyId.to_hex() : String(policyId || '');
+          if (normalizePolicyId(policyHex) !== normalizedPolicy) continue;
+
+          const assets = multiAsset.get(policyId);
+          if (!assets) continue;
+
+          const assetNames = assets.keys();
+          for (let j = 0; j < assetNames.len(); j += 1) {
+            const assetName = assetNames.get(j);
+            const quantity = assets.get(assetName);
+            total += normalizeAssetQuantity(quantity?.to_str ? quantity.to_str() : quantity?.toString?.() || '0');
+          }
+        }
+        return total;
+      } catch (err) {
+        console.warn('[PREEB] Could not parse serialized UTXO for Flowmass NFT scan:', getErrorMessage(err));
+        return 0;
+      }
+    }
+
+    if (typeof utxo === 'object') {
+      const assetSources = [
+        utxo.assets,
+        utxo.multiAssets,
+        utxo.multi_asset,
+        utxo.value?.assets,
+        utxo.value?.multiAssets,
+        utxo.value?.multi_asset,
+        utxo.output?.amount?.assets,
+        utxo.output?.amount?.multiAsset,
+        utxo.output?.amount?.multi_asset,
+      ];
+
+      let total = 0;
+      assetSources.forEach((source) => {
+        total += countFlowmassNftsFromAssetMap(source, normalizedPolicy);
+      });
+
+      if (total > 0) return total;
+
+      if (Array.isArray(utxo.assets)) {
+        return countFlowmassNftsFromAssetMap(utxo.assets, normalizedPolicy);
+      }
+    }
+
+    return 0;
+  }
+
   async function countFlowmassNfts() {
     if (!walletState.api?.getUtxos) return 0;
 
@@ -830,37 +961,19 @@
       const utxos = await walletState.api.getUtxos();
       if (!Array.isArray(utxos) || utxos.length === 0) return 0;
 
-      const csl = await loadCardanoSerializationLib();
       let total = 0;
+      const normalizedPolicy = normalizePolicyId(FLOWMASS_POLICY_ID);
+      let csl = null;
 
-      for (const utxoHex of utxos) {
-        try {
-          const utxo = csl.TransactionUnspentOutput.from_bytes(hexToBytes(utxoHex));
-          const value = utxo.output().amount();
-          const multiAsset = value.multi_asset();
-          if (!multiAsset) continue;
-
-          const policyIds = multiAsset.keys();
-          for (let i = 0; i < policyIds.len(); i += 1) {
-            const policyId = policyIds.get(i);
-            const policyHex = policyId?.to_hex ? policyId.to_hex() : String(policyId || '');
-            if (policyHex !== FLOWMASS_POLICY_ID) continue;
-
-            const assets = multiAsset.get(policyId);
-            if (!assets) continue;
-
-            const assetNames = assets.keys();
-            for (let j = 0; j < assetNames.len(); j += 1) {
-              const assetName = assetNames.get(j);
-              const quantity = assets.get(assetName);
-              const rawQty = quantity?.to_str ? quantity.to_str() : quantity?.toString?.() || '0';
-              total += Number(rawQty || 0);
-            }
-          }
-        } catch (innerErr) {
-          console.warn('[PREEB] Could not inspect Flowmass NFT holdings:', getErrorMessage(innerErr));
-        }
+      try {
+        csl = await loadCardanoSerializationLib();
+      } catch (err) {
+        console.warn('[PREEB] CSL unavailable for Flowmass NFT scan, falling back to object-based UTXO parsing:', getErrorMessage(err));
       }
+
+      utxos.forEach((utxo) => {
+        total += countFlowmassNftsFromUtxo(utxo, csl, normalizedPolicy);
+      });
 
       return total;
     } catch (err) {
