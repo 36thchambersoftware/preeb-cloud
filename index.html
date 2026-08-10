@@ -432,6 +432,24 @@
               <div class="wallet-address__fallback wallet-stat__mono" id="wallet-address-fallback">—</div>
             </div>
           </div>
+          <div class="wallet-roles" id="wallet-roles-panel" hidden>
+            <div class="wallet-roles__header">
+              <h3>Your available PREEB roles</h3>
+              <p id="wallet-role-summary">
+                Based on your connected wallet balance and any Flowmass NFTs you hold, these are the roles you currently qualify for.
+              </p>
+            </div>
+            <div class="wallet-roles__grid">
+              <div class="wallet-roles__group">
+                <h4>Delegator roles</h4>
+                <ul class="wallet-roles__list" id="wallet-delegator-roles"></ul>
+              </div>
+              <div class="wallet-roles__group">
+                <h4>Flowmass roles</h4>
+                <ul class="wallet-roles__list" id="wallet-flowmass-roles"></ul>
+              </div>
+            </div>
+          </div>
           <div class="wallet-stat">
             <span class="wallet-stat__label">Delegated Pool</span>
             <span class="wallet-stat__value wallet-stat__mono" id="wallet-delegated-pool">—</span>
@@ -458,7 +476,6 @@
           </div>
         </div>
 
-        <div class="wallet-roles" id="wallet-roles-panel" hidden>
           <div class="wallet-roles__header">
             <h3>Your available PREEB roles</h3>
             <p id="wallet-role-summary">

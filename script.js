@@ -146,6 +146,58 @@
     return value.startsWith('$') ? value : `$${value}`;
   }
 
+  function shortenAddress(value, head = 8, tail = 4) {
+    const text = String(value || '').trim();
+    if (!text) return '—';
+    if (text.length <= head + tail + 3) return text;
+    return `${text.slice(0, head)}...${text.slice(-tail)}`;
+  }
+
+  const WALLET_ICON_MARKUP = {
+    eternl: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#ff7a00"></rect><path d="M22 18h20l-6 10h-8l-6-10Zm-6 14h32l-6 10H22l-6-10Zm10 14h12l-6 10-6-10Z" fill="#fff"></path></svg>',
+    vespr: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#6c4df6"></rect><path d="M20 18h24v10H28v8h12v10H28v8h16v10H20V18Z" fill="#fff"></path></svg>',
+    typhon: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#18c8c8"></rect><path d="M20 18h10l14 28 10-14h10l-20 38-20-38Z" fill="#fff"></path></svg>',
+    lace: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#111827"></rect><path d="M18 18h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Z" fill="#fff"></path></svg>',
+  };
+
+  function getWalletIconMarkup(walletKey, walletLabel) {
+    const key = String(walletKey || '').trim().toLowerCase();
+    const label = String(walletLabel || '').trim().toLowerCase();
+
+    if (key === 'eternl' || label.includes('eternl')) return WALLET_ICON_MARKUP.eternl;
+    if (key === 'vespr' || label.includes('vespr')) return WALLET_ICON_MARKUP.vespr;
+    if (key === 'typhoncip30' || key === 'typhon' || label.includes('typhon')) return WALLET_ICON_MARKUP.typhon;
+    if (key === 'lace' || label.includes('lace')) return WALLET_ICON_MARKUP.lace;
+    return '';
+  }
+
+  function renderWalletName() {
+    const walletName = document.getElementById('wallet-name');
+    if (!walletName) return;
+
+    walletName.classList.remove('wallet-stat__value--with-icon');
+    walletName.innerHTML = '';
+
+    if (!walletState.walletLabel) {
+      walletName.textContent = '—';
+      return;
+    }
+
+    const iconMarkup = getWalletIconMarkup(walletState.walletKey, walletState.walletLabel);
+    if (iconMarkup) {
+      const icon = document.createElement('span');
+      icon.className = 'wallet-brand-icon';
+      icon.innerHTML = iconMarkup;
+      walletName.appendChild(icon);
+      walletName.classList.add('wallet-stat__value--with-icon');
+    }
+
+    const label = document.createElement('span');
+    label.className = 'wallet-brand-label';
+    label.textContent = walletState.walletLabel;
+    walletName.appendChild(label);
+  }
+
   function hexToBytes(hex) {
     if (!hex || typeof hex !== 'string') return new Uint8Array();
     const bytes = new Uint8Array(hex.length / 2);
@@ -1312,8 +1364,8 @@
     const delegateBtn = document.getElementById('wallet-delegate-btn');
 
     if (walletGrid) walletGrid.hidden = walletState.isSyncing;
-    if (walletName) walletName.textContent = walletState.walletLabel || '—';
-    if (walletAddressFallback) walletAddressFallback.textContent = walletState.stakeAddress || '—';
+    renderWalletName();
+    if (walletAddressFallback) walletAddressFallback.textContent = shortenAddress(walletState.stakeAddress);
     if (walletAddressHandles) {
       const handles = Array.isArray(walletHandles) ? walletHandles : [];
       walletAddressHandles.innerHTML = '';
@@ -1397,6 +1449,7 @@
       walletState.walletKey = walletConfig.key;
       walletState.walletLabel = walletConfig.label;
       walletState.api = api;
+      renderWalletName();
       walletState.rewardAddressHex = rewardAddresses[0];
       walletState.stakeAddress = await getStakeAddressFromRewardHex(rewardAddresses[0]);
       walletState.delegationVerified = false;
@@ -1420,9 +1473,9 @@
         renderWalletRoleEligibility(null);
 
         if (walletGrid) walletGrid.hidden = false;
-        if (walletName) walletName.textContent = walletState.walletLabel || '—';
+        renderWalletName();
         if (walletAddressHandles) walletAddressHandles.hidden = true;
-        if (walletAddressFallback) walletAddressFallback.textContent = walletState.stakeAddress || '—';
+        if (walletAddressFallback) walletAddressFallback.textContent = shortenAddress(walletState.stakeAddress);
         if (walletDelegatedPool) walletDelegatedPool.textContent = 'Unavailable (network error)';
         if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
         if (walletEarned) walletEarned.textContent = 'Unavailable (network error)';
@@ -1511,7 +1564,7 @@
       const protocolParams = Array.isArray(protocolParamsRaw) ? protocolParamsRaw[0] : protocolParamsRaw;
       if (!protocolParams || typeof protocolParams !== 'object') {
         if (walletAddressHandles) walletAddressHandles.hidden = true;
-        if (walletAddressFallback) walletAddressFallback.textContent = walletState.stakeAddress || '—';
+        if (walletAddressFallback) walletAddressFallback.textContent = shortenAddress(walletState.stakeAddress);
       }
 
       const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
