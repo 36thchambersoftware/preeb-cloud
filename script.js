@@ -856,9 +856,15 @@
 
     return assetRows.reduce((sum, entry) => {
       if (!entry || typeof entry !== 'object') return sum;
-      const policy = normalizePolicyId(entry.policy_id || entry.policyId || entry.policy || entry.unit?.split('.')[0]);
-      if (policy !== normalizedPolicy) return sum;
-      return sum + normalizeAssetQuantity(entry.quantity || entry.qty || entry.amount || entry.count || 1);
+
+      const unit = entry.unit || entry.asset_id || entry.assetId || entry.asset || entry.asset_name || entry.name || '';
+      const policyFromUnit = typeof unit === 'string' && unit.includes('.')
+        ? normalizePolicyId(unit.split('.')[0])
+        : normalizePolicyId(entry.policy_id || entry.policyId || entry.policy || '');
+      const quantityValue = entry.quantity || entry.qty || entry.amount || entry.count || entry.balance || entry.total || 1;
+
+      if (policyFromUnit !== normalizedPolicy) return sum;
+      return sum + normalizeAssetQuantity(quantityValue);
     }, 0);
   }
 
@@ -867,9 +873,12 @@
 
     if (Array.isArray(assetMap)) {
       return assetMap.reduce((sum, entry) => {
-        const policy = normalizePolicyId(entry?.policyId || entry?.policy_id || entry?.policy || entry?.unit?.split('.')[0]);
+        const unit = entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || entry?.asset_name || entry?.name || '';
+        const policy = typeof unit === 'string' && unit.includes('.')
+          ? normalizePolicyId(unit.split('.')[0])
+          : normalizePolicyId(entry?.policyId || entry?.policy_id || entry?.policy || '');
         if (policy !== normalizedPolicy) return sum;
-        return sum + normalizeAssetQuantity(entry?.quantity || entry?.qty || entry?.amount || entry?.count || 1);
+        return sum + normalizeAssetQuantity(entry?.quantity || entry?.qty || entry?.amount || entry?.count || entry?.balance || entry?.total || 1);
       }, 0);
     }
 
