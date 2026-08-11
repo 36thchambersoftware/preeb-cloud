@@ -1480,11 +1480,12 @@
       }
     }
 
+    setWalletSyncState(false, 'Wallet details loaded.');
+
     const delegatedToPreeb = isDelegatedToPreeb(walletState.delegatedPool, walletState.delegatedPoolTicker);
     const canDelegate = Boolean(
       walletState.api &&
       walletState.stakeAddress &&
-      !walletState.isSyncing &&
       !delegatedToPreeb
     );
     if (delegateBtn) {
@@ -1492,8 +1493,6 @@
       delegateBtn.disabled = !canDelegate;
       delegateBtn.style.display = canDelegate ? '' : 'none';
     }
-
-    setWalletSyncState(false, 'Wallet details loaded.');
 
     let earnedAda = null;
     if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
