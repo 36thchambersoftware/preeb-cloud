@@ -119,6 +119,36 @@
     })} ₳`;
   }
 
+  function parseLovelaceValue(value) {
+    if (value == null || value === '') return 0;
+    if (typeof value === 'bigint') return Number(value);
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return 0;
+      if (/^\d+$/.test(trimmed)) return Number(trimmed);
+      const numeric = Number(trimmed);
+      return Number.isFinite(numeric) ? numeric : 0;
+    }
+    return Number(value) || 0;
+  }
+
+  async function getWalletBalanceLovelace(accountInfo) {
+    if (walletState.api?.getBalance) {
+      try {
+        const balance = await walletState.api.getBalance();
+        const parsed = parseLovelaceValue(balance);
+        if (parsed > 0 || balance === '0' || balance === 0) {
+          return parsed;
+        }
+      } catch (err) {
+        console.warn('[PREEB] Could not read wallet balance from provider:', getErrorMessage(err));
+      }
+    }
+
+    return parseLovelaceValue(accountInfo?.total_balance ?? accountInfo?.utxo ?? 0);
+  }
+
   function formatApyPercent(rawPercent, decimals = 2) {
     if (rawPercent == null || Number.isNaN(Number(rawPercent))) return '—';
     return `${Number(rawPercent).toFixed(decimals)}%`;
@@ -1201,8 +1231,10 @@
     panel.hidden = false;
   }
 
-  async function loadWalletRoleEligibility() {
-    const adaBalance = Number(walletState.accountInfo?.total_balance || walletState.accountInfo?.utxo || 0);
+  async function loadWalletRoleEligibility(balanceOverride = null) {
+    const adaBalance = balanceOverride != null
+      ? parseLovelaceValue(balanceOverride)
+      : await getWalletBalanceLovelace(walletState.accountInfo);
     const flowmassCount = await countFlowmassNfts();
 
     walletState.flowmassCount = flowmassCount;
@@ -1245,7 +1277,7 @@
     return walletState.apyWindows;
   }
 
-  function renderWalletSummaryStats(account, apyWindows) {
+  function renderWalletSummaryStats(account, apyWindows, walletBalanceLovelace = null) {
     const balanceEl = document.getElementById('wallet-ada-balance');
     const apy3e = document.getElementById('wallet-apy-3e');
     const apy3m = document.getElementById('wallet-apy-3m');
@@ -1253,7 +1285,7 @@
     const apy12m = document.getElementById('wallet-apy-12m');
 
     if (balanceEl) {
-      const adaBalance = Number(account?.total_balance || account?.utxo || 0);
+      const adaBalance = parseLovelaceValue(walletBalanceLovelace ?? account?.total_balance ?? account?.utxo ?? 0);
       balanceEl.textContent = Number.isFinite(adaBalance) && adaBalance > 0
         ? formatAdaExact(adaBalance, 2)
         : '0.00 ₳';
@@ -1434,8 +1466,10 @@
       walletState.delegatedPoolTicker = null;
     }
 
-    renderWalletSummaryStats(account, apyWindows);
-    await loadWalletRoleEligibility();
+    const walletBalanceLovelace = await getWalletBalanceLovelace(account);
+
+    renderWalletSummaryStats(account, apyWindows, walletBalanceLovelace);
+    await loadWalletRoleEligibility(walletBalanceLovelace);
 
     const walletGrid = document.getElementById('wallet-grid');
     const walletEarnedPanel = document.getElementById('wallet-earned-panel');
