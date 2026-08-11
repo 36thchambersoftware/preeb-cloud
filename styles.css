@@ -1303,6 +1303,10 @@ ul { list-style: none; }
   flex-wrap: wrap;
 }
 
+.wallet-actions--top {
+  margin-bottom: var(--space-md);
+}
+
 .wallet-actions__note {
   color: var(--color-text-muted);
   font-size: 0.9rem;
