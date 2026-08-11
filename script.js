@@ -154,10 +154,10 @@
   }
 
   const WALLET_ICON_MARKUP = {
-    eternl: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#fff7ed"></rect><path d="M18 16h28l-4 10H22l-4-10Zm-4 16h36l-4 10H18l-4-10Zm8 16h20l-4 10H22l-4-10Z" fill="#ff7a00"></path></svg>',
-    vespr: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#f5f3ff"></rect><path d="M18 18h28v10H28v8h12v10H28v8h16v10H18V18Z" fill="#6c4df6"></path></svg>',
-    typhon: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#ecfeff"></rect><path d="M20 18h10l14 28 10-14h10l-20 38-20-38Z" fill="#0f766e"></path></svg>',
-    lace: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#111827"></rect><path d="M18 18h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Z" fill="#ffffff"></path></svg>',
+    eternl: '<img src="images/wallet-logos/eternl.png" alt="" loading="lazy" />',
+    vespr: '<img src="images/wallet-logos/vespr.png" alt="" loading="lazy" />',
+    typhon: '<img src="images/wallet-logos/typhon.svg" alt="" loading="lazy" />',
+    lace: '<span class="wallet-brand-icon__fallback">L</span>',
   };
 
   function getWalletIconMarkup(walletKey, walletLabel) {
@@ -1189,6 +1189,8 @@
     const adaBalance = Number(walletState.accountInfo?.total_balance || walletState.accountInfo?.utxo || 0);
     const flowmassCount = await countFlowmassNfts();
 
+    walletState.flowmassCount = flowmassCount;
+
     renderWalletRoleEligibility({
       adaBalance,
       flowmassCount,
@@ -1227,11 +1229,42 @@
     return walletState.apyWindows;
   }
 
-  function renderApyWindows(apyWindows) {
+  function renderWalletSummaryStats(account, apyWindows, estimatedRewards, flowmassCount) {
+    const adaBalanceEl = document.getElementById('wallet-ada-balance');
+    const rewardsEl = document.getElementById('wallet-estimated-rewards');
+    const flowmassEl = document.getElementById('wallet-flowmass-count');
+    const statusEl = document.getElementById('wallet-delegation-status');
     const apy3e = document.getElementById('wallet-apy-3e');
     const apy3m = document.getElementById('wallet-apy-3m');
     const apy6m = document.getElementById('wallet-apy-6m');
     const apy12m = document.getElementById('wallet-apy-12m');
+
+    if (adaBalanceEl) {
+      const adaBalance = Number(account?.total_balance || account?.utxo || 0);
+      adaBalanceEl.textContent = Number.isFinite(adaBalance) && adaBalance > 0
+        ? formatAdaExact(adaBalance, 2)
+        : '0.00 ₳';
+    }
+
+    if (rewardsEl) {
+      rewardsEl.textContent = Number.isFinite(estimatedRewards) && estimatedRewards > 0
+        ? `${formatAdaExact(Math.round(estimatedRewards), 2)} / year`
+        : '—';
+    }
+
+    if (flowmassEl) {
+      flowmassEl.textContent = Number.isFinite(flowmassCount) && flowmassCount > 0 ? `${flowmassCount}` : '0';
+    }
+
+    if (statusEl) {
+      if (!account?.delegated_pool) {
+        statusEl.textContent = 'Not delegated';
+      } else if (isDelegatedToPreeb(account?.delegated_pool, walletState.delegatedPoolTicker)) {
+        statusEl.textContent = 'Delegated to PREEB';
+      } else {
+        statusEl.textContent = 'Delegated elsewhere';
+      }
+    }
 
     if (apy3e) apy3e.textContent = formatApyPercent(apyWindows?.epochs3);
     if (apy3m) apy3m.textContent = formatApyPercent(apyWindows?.months3);
@@ -1354,7 +1387,8 @@
       walletState.delegatedPoolTicker = null;
     }
 
-    renderApyWindows(apyWindows);
+    const estimatedRewards = calculateEstimatedAnnualPreebRewards(account, apyWindows?.epochs3);
+    renderWalletSummaryStats(account, apyWindows, estimatedRewards, walletState.flowmassCount ?? 0);
     await loadWalletRoleEligibility();
 
     const walletGrid = document.getElementById('wallet-grid');
