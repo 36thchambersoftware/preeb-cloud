@@ -1290,15 +1290,24 @@
   }
 
   function getDelegationStartEpoch(account) {
-    const candidates = [
+    const candidateSources = [
       account?.delegated_since,
       account?.delegated_since_epoch,
+      account?.delegation?.active_epoch_no,
+      account?.delegation?.active_epoch,
+      account?.stake_delegation?.active_epoch_no,
+      account?.stake_delegation?.active_epoch,
       account?.active_epoch_no,
       account?.active_epoch,
-      account?.stake_delegation?.active_epoch_no,
+      account?.epoch_no,
+      account?.epoch,
+      account?.current_epoch,
+      account?.current_epoch_no,
+      account?.delegation?.epoch_no,
+      account?.delegation?.epoch,
     ];
 
-    for (const value of candidates) {
+    for (const value of candidateSources) {
       const parsed = Number(value);
       if (Number.isFinite(parsed) && parsed > 0) return parsed;
     }
@@ -1381,22 +1390,46 @@
     }
 
     const counts = {
-      txCount: Number(account?.tx_count ?? account?.transaction_count ?? account?.total_txs ?? 0),
+      txCount: 0,
       ftCount: 0,
       nftCount: 0,
     };
 
+    const txCandidates = [
+      account?.tx_count,
+      account?.transaction_count,
+      account?.total_txs,
+      account?.txs,
+      account?.total_transactions,
+      account?.transactions,
+      account?.sum_tx_count,
+      account?.tx_count_all,
+    ];
+
+    for (const candidate of txCandidates) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        counts.txCount = parsed;
+        break;
+      }
+    }
+
     try {
       const walletAssets = Array.isArray(assetRows) ? assetRows : [];
       if (walletAssets.length > 0) {
-        counts.ftCount = walletAssets.filter((entry) => {
+        const assetEntries = walletAssets.filter((entry) => {
           const quantity = Number(getAssetQuantityValue(entry));
-          return quantity > 0 && String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '').includes('.') && getAssetPolicyId(entry) !== '';
+          return Number.isFinite(quantity) && quantity > 0;
+        });
+
+        counts.nftCount = assetEntries.filter((entry) => {
+          const unit = String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '');
+          return unit && !unit.includes('.') && getAssetPolicyId(entry) !== '';
         }).length;
 
-        counts.nftCount = walletAssets.filter((entry) => {
-          const quantity = Number(getAssetQuantityValue(entry));
-          return quantity > 0 && !String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '').includes('.') && getAssetPolicyId(entry) !== '';
+        counts.ftCount = assetEntries.filter((entry) => {
+          const unit = String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '');
+          return unit && unit.includes('.') && getAssetPolicyId(entry) !== '';
         }).length;
       }
     } catch {
