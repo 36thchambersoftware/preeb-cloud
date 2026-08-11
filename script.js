@@ -1230,6 +1230,7 @@
   }
 
   function renderWalletSummaryStats(account, apyWindows, counts) {
+    const balanceEl = document.getElementById('wallet-ada-balance');
     const txsEl = document.getElementById('wallet-total-txs');
     const ftsEl = document.getElementById('wallet-total-fts');
     const nftsEl = document.getElementById('wallet-total-nfts');
@@ -1237,6 +1238,13 @@
     const apy3m = document.getElementById('wallet-apy-3m');
     const apy6m = document.getElementById('wallet-apy-6m');
     const apy12m = document.getElementById('wallet-apy-12m');
+
+    if (balanceEl) {
+      const adaBalance = Number(account?.total_balance || account?.utxo || 0);
+      balanceEl.textContent = Number.isFinite(adaBalance) && adaBalance > 0
+        ? formatAdaExact(adaBalance, 2)
+        : '0.00 ₳';
+    }
 
     if (txsEl) {
       txsEl.textContent = Number.isFinite(counts?.txCount) && counts.txCount > 0 ? counts.txCount.toLocaleString() : '0';
@@ -1346,11 +1354,12 @@
 
     setWalletSyncState(true, 'Collecting wallet and delegation details...');
 
-    const [account, apyWindows, tipRows, walletHandles] = await Promise.all([
+    const [account, apyWindows, tipRows, walletHandles, assetRows] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
       loadPoolApyWindows(),
       fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
       loadWalletHandles(),
+      loadWalletAssetRows(),
     ]);
 
     const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
@@ -1372,20 +1381,23 @@
     }
 
     const counts = {
-      txCount: Number(account?.tx_count ?? account?.transaction_count ?? 0),
+      txCount: Number(account?.tx_count ?? account?.transaction_count ?? account?.total_txs ?? 0),
       ftCount: 0,
       nftCount: 0,
     };
 
     try {
-      const assets = await walletState.api?.getAssets?.();
-      if (assets && typeof assets === 'object') {
-        const assetEntries = Object.entries(assets || {});
-        const policyEntries = assetEntries.filter(([assetId]) => assetId && assetId.length > 56);
-        const ftCount = policyEntries.filter(([assetId, qty]) => Number(qty) > 0 && assetId.split('.').length > 1).length;
-        const nftCount = policyEntries.filter(([assetId, qty]) => Number(qty) > 0 && assetId.split('.').length === 1).length;
-        counts.ftCount = ftCount;
-        counts.nftCount = nftCount;
+      const walletAssets = Array.isArray(assetRows) ? assetRows : [];
+      if (walletAssets.length > 0) {
+        counts.ftCount = walletAssets.filter((entry) => {
+          const quantity = Number(getAssetQuantityValue(entry));
+          return quantity > 0 && String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '').includes('.') && getAssetPolicyId(entry) !== '';
+        }).length;
+
+        counts.nftCount = walletAssets.filter((entry) => {
+          const quantity = Number(getAssetQuantityValue(entry));
+          return quantity > 0 && !String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '').includes('.') && getAssetPolicyId(entry) !== '';
+        }).length;
       }
     } catch {
       counts.ftCount = 0;
