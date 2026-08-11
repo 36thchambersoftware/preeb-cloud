@@ -127,26 +127,60 @@
       const trimmed = value.trim();
       if (!trimmed) return 0;
       if (/^\d+$/.test(trimmed)) return Number(trimmed);
-      const numeric = Number(trimmed);
-      return Number.isFinite(numeric) ? numeric : 0;
+
+      const normalized = trimmed.replace(/,/g, '').replace(/[^\d.-]/g, '');
+      if (!normalized || normalized === '.') return 0;
+
+      const numeric = Number(normalized);
+      if (!Number.isFinite(numeric)) return 0;
+
+      if (trimmed.includes('.') || trimmed.includes(',')) {
+        return Math.round(numeric * 1_000_000);
+      }
+
+      return numeric;
     }
+
+    if (typeof value === 'object') {
+      const candidates = [
+        value?.lovelace,
+        value?.coin,
+        value?.amount,
+        value?.balance,
+        value?.total,
+        value?.ada,
+        value?.quantity,
+        value?.value,
+        value?.value?.coin,
+        value?.value?.lovelace,
+        value?.value?.ada,
+        value?.amount?.coin,
+        value?.amount?.lovelace,
+        value?.amount?.ada,
+        value?.output?.amount?.coin,
+        value?.output?.amount?.lovelace,
+        value?.output?.amount?.ada,
+      ];
+
+      for (const candidate of candidates) {
+        const parsed = parseLovelaceValue(candidate);
+        if (parsed > 0) return parsed;
+      }
+    }
+
     return Number(value) || 0;
   }
 
   async function getWalletBalanceLovelace(accountInfo) {
-    if (walletState.api?.getBalance) {
-      try {
-        const balance = await walletState.api.getBalance();
-        const parsed = parseLovelaceValue(balance);
-        if (parsed > 0 || balance === '0' || balance === 0) {
-          return parsed;
-        }
-      } catch (err) {
-        console.warn('[PREEB] Could not read wallet balance from provider:', getErrorMessage(err));
-      }
-    }
-
-    return parseLovelaceValue(accountInfo?.total_balance ?? accountInfo?.utxo ?? 0);
+    return parseLovelaceValue(
+      accountInfo?.total_balance
+      ?? accountInfo?.controlled_amount
+      ?? accountInfo?.balance
+      ?? accountInfo?.utxo
+      ?? accountInfo?.utxo_value
+      ?? accountInfo?.value
+      ?? 0
+    );
   }
 
   function formatApyPercent(rawPercent, decimals = 2) {
