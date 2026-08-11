@@ -1072,29 +1072,6 @@
     }
   }
 
-  async function loadWalletTransactionCount() {
-    if (!walletState.stakeAddress) return 0;
-
-    try {
-      const rows = await fetchKoiosJson('/account_txs', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ _stake_addresses: [walletState.stakeAddress] }),
-      });
-
-      if (Array.isArray(rows)) return rows.length;
-      if (Array.isArray(rows?.txs)) return rows.txs.length;
-      if (Array.isArray(rows?.data)) return rows.data.length;
-      return 0;
-    } catch (err) {
-      console.warn('[PREEB] Could not load wallet transaction count:', getErrorMessage(err));
-      return 0;
-    }
-  }
-
   async function countFlowmassNfts() {
     const normalizedPolicy = normalizePolicyId(FLOWMASS_POLICY_ID);
 
@@ -1252,11 +1229,8 @@
     return walletState.apyWindows;
   }
 
-  function renderWalletSummaryStats(account, apyWindows, counts) {
+  function renderWalletSummaryStats(account, apyWindows) {
     const balanceEl = document.getElementById('wallet-ada-balance');
-    const txsEl = document.getElementById('wallet-total-txs');
-    const ftsEl = document.getElementById('wallet-total-fts');
-    const nftsEl = document.getElementById('wallet-total-nfts');
     const apy3e = document.getElementById('wallet-apy-3e');
     const apy3m = document.getElementById('wallet-apy-3m');
     const apy6m = document.getElementById('wallet-apy-6m');
@@ -1267,18 +1241,6 @@
       balanceEl.textContent = Number.isFinite(adaBalance) && adaBalance > 0
         ? formatAdaExact(adaBalance, 2)
         : '0.00 ₳';
-    }
-
-    if (txsEl) {
-      txsEl.textContent = Number.isFinite(counts?.txCount) && counts.txCount > 0 ? counts.txCount.toLocaleString() : '0';
-    }
-
-    if (ftsEl) {
-      ftsEl.textContent = Number.isFinite(counts?.ftCount) && counts.ftCount > 0 ? counts.ftCount.toLocaleString() : '0';
-    }
-
-    if (nftsEl) {
-      nftsEl.textContent = Number.isFinite(counts?.nftCount) && counts.nftCount > 0 ? counts.nftCount.toLocaleString() : '0';
     }
 
     if (apy3e) apy3e.textContent = formatApyPercent(apyWindows?.epochs3);
@@ -1386,13 +1348,11 @@
 
     setWalletSyncState(true, 'Collecting wallet and delegation details...');
 
-    const [account, apyWindows, tipRows, walletHandles, assetRows, txCount] = await Promise.all([
+    const [account, apyWindows, tipRows, walletHandles] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
       loadPoolApyWindows(),
       fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
       loadWalletHandles(),
-      loadWalletAssetRows(),
-      loadWalletTransactionCount(),
     ]);
 
     const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
@@ -1413,36 +1373,7 @@
       walletState.delegatedPoolTicker = null;
     }
 
-    const counts = {
-      txCount: Number.isFinite(Number(txCount)) ? Number(txCount) : 0,
-      ftCount: 0,
-      nftCount: 0,
-    };
-
-    try {
-      const walletAssets = Array.isArray(assetRows) ? assetRows : [];
-      if (walletAssets.length > 0) {
-        const assetEntries = walletAssets.filter((entry) => {
-          const quantity = Number(getAssetQuantityValue(entry));
-          return Number.isFinite(quantity) && quantity > 0;
-        });
-
-        counts.nftCount = assetEntries.filter((entry) => {
-          const quantity = Number(getAssetQuantityValue(entry));
-          return quantity <= 1;
-        }).length;
-
-        counts.ftCount = assetEntries.filter((entry) => {
-          const quantity = Number(getAssetQuantityValue(entry));
-          return quantity > 1;
-        }).length;
-      }
-    } catch {
-      counts.ftCount = 0;
-      counts.nftCount = 0;
-    }
-
-    renderWalletSummaryStats(account, apyWindows, counts);
+    renderWalletSummaryStats(account, apyWindows);
     await loadWalletRoleEligibility();
 
     const walletGrid = document.getElementById('wallet-grid');
