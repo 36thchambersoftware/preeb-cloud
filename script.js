@@ -1278,18 +1278,37 @@
     const candidateSources = [
       account?.delegated_since,
       account?.delegated_since_epoch,
+      account?.delegation?.delegated_since,
+      account?.delegation?.delegated_since_epoch,
+      account?.stake_delegation?.delegated_since,
+      account?.stake_delegation?.delegated_since_epoch,
+      account?.delegation?.start_epoch,
+      account?.delegation?.epoch_started,
+      account?.stake_delegation?.start_epoch,
+      account?.stake_delegation?.epoch_started,
+    ];
+
+    for (const value of candidateSources) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+
+    return null;
+  }
+
+  function getCurrentEpoch(account, currentEpoch) {
+    const candidateSources = [
+      Number(currentEpoch),
+      account?.active_epoch_no,
+      account?.active_epoch,
+      account?.current_epoch_no,
+      account?.current_epoch,
+      account?.epoch_no,
+      account?.epoch,
       account?.delegation?.active_epoch_no,
       account?.delegation?.active_epoch,
       account?.stake_delegation?.active_epoch_no,
       account?.stake_delegation?.active_epoch,
-      account?.active_epoch_no,
-      account?.active_epoch,
-      account?.epoch_no,
-      account?.epoch,
-      account?.current_epoch,
-      account?.current_epoch_no,
-      account?.delegation?.epoch_no,
-      account?.delegation?.epoch,
     ];
 
     for (const value of candidateSources) {
@@ -1304,10 +1323,14 @@
     if (!account?.delegated_pool) return 'Not currently delegated';
 
     const startEpoch = getDelegationStartEpoch(account);
-    const epochNow = Number(currentEpoch);
+    const epochNow = getCurrentEpoch(account, currentEpoch);
 
-    if (!Number.isFinite(startEpoch) || !Number.isFinite(epochNow) || epochNow < startEpoch) {
-      return startEpoch ? `Since epoch ${startEpoch}` : 'Delegated (start epoch unavailable)';
+    if (!Number.isFinite(startEpoch)) {
+      return 'Delegated (start epoch unavailable)';
+    }
+
+    if (!Number.isFinite(epochNow) || epochNow < startEpoch) {
+      return `Since epoch ${startEpoch}`;
     }
 
     const epochs = Math.max(1, Math.floor(epochNow - startEpoch + 1));
@@ -1329,14 +1352,14 @@
 
   function formatEpochsStaked(account, currentEpoch) {
     const startEpoch = getDelegationStartEpoch(account);
-    const epochNow = Number(currentEpoch);
+    const epochNow = getCurrentEpoch(account, currentEpoch);
 
     if (!account?.delegated_pool) return 'Not currently delegated';
-    if (!Number.isFinite(startEpoch) || !Number.isFinite(epochNow) || epochNow < startEpoch) {
-      if (Number.isFinite(startEpoch) && Number.isFinite(epochNow)) {
-        return `${startEpoch} → ${epochNow}`;
-      }
+    if (!Number.isFinite(startEpoch)) {
       return 'Awaiting epoch data';
+    }
+    if (!Number.isFinite(epochNow) || epochNow < startEpoch) {
+      return `Since epoch ${startEpoch}`;
     }
 
     const epochs = Math.max(1, Math.floor(epochNow - startEpoch + 1));
