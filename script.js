@@ -1072,6 +1072,29 @@
     }
   }
 
+  async function loadWalletTransactionCount() {
+    if (!walletState.stakeAddress) return 0;
+
+    try {
+      const rows = await fetchKoiosJson('/account_txs', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ _stake_addresses: [walletState.stakeAddress] }),
+      });
+
+      if (Array.isArray(rows)) return rows.length;
+      if (Array.isArray(rows?.txs)) return rows.txs.length;
+      if (Array.isArray(rows?.data)) return rows.data.length;
+      return 0;
+    } catch (err) {
+      console.warn('[PREEB] Could not load wallet transaction count:', getErrorMessage(err));
+      return 0;
+    }
+  }
+
   async function countFlowmassNfts() {
     const normalizedPolicy = normalizePolicyId(FLOWMASS_POLICY_ID);
 
@@ -1363,12 +1386,13 @@
 
     setWalletSyncState(true, 'Collecting wallet and delegation details...');
 
-    const [account, apyWindows, tipRows, walletHandles, assetRows] = await Promise.all([
+    const [account, apyWindows, tipRows, walletHandles, assetRows, txCount] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
       loadPoolApyWindows(),
       fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
       loadWalletHandles(),
       loadWalletAssetRows(),
+      loadWalletTransactionCount(),
     ]);
 
     const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
@@ -1390,29 +1414,10 @@
     }
 
     const counts = {
-      txCount: 0,
+      txCount: Number.isFinite(Number(txCount)) ? Number(txCount) : 0,
       ftCount: 0,
       nftCount: 0,
     };
-
-    const txCandidates = [
-      account?.tx_count,
-      account?.transaction_count,
-      account?.total_txs,
-      account?.txs,
-      account?.total_transactions,
-      account?.transactions,
-      account?.sum_tx_count,
-      account?.tx_count_all,
-    ];
-
-    for (const candidate of txCandidates) {
-      const parsed = Number(candidate);
-      if (Number.isFinite(parsed) && parsed >= 0) {
-        counts.txCount = parsed;
-        break;
-      }
-    }
 
     try {
       const walletAssets = Array.isArray(assetRows) ? assetRows : [];
@@ -1423,13 +1428,13 @@
         });
 
         counts.nftCount = assetEntries.filter((entry) => {
-          const unit = String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '');
-          return unit && !unit.includes('.') && getAssetPolicyId(entry) !== '';
+          const quantity = Number(getAssetQuantityValue(entry));
+          return quantity <= 1;
         }).length;
 
         counts.ftCount = assetEntries.filter((entry) => {
-          const unit = String(entry?.unit || entry?.asset_id || entry?.assetId || entry?.asset || '');
-          return unit && unit.includes('.') && getAssetPolicyId(entry) !== '';
+          const quantity = Number(getAssetQuantityValue(entry));
+          return quantity > 1;
         }).length;
       }
     } catch {
