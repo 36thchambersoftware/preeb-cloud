@@ -1229,41 +1229,25 @@
     return walletState.apyWindows;
   }
 
-  function renderWalletSummaryStats(account, apyWindows, estimatedRewards, flowmassCount) {
-    const adaBalanceEl = document.getElementById('wallet-ada-balance');
-    const rewardsEl = document.getElementById('wallet-estimated-rewards');
-    const flowmassEl = document.getElementById('wallet-flowmass-count');
-    const statusEl = document.getElementById('wallet-delegation-status');
+  function renderWalletSummaryStats(account, apyWindows, counts) {
+    const txsEl = document.getElementById('wallet-total-txs');
+    const ftsEl = document.getElementById('wallet-total-fts');
+    const nftsEl = document.getElementById('wallet-total-nfts');
     const apy3e = document.getElementById('wallet-apy-3e');
     const apy3m = document.getElementById('wallet-apy-3m');
     const apy6m = document.getElementById('wallet-apy-6m');
     const apy12m = document.getElementById('wallet-apy-12m');
 
-    if (adaBalanceEl) {
-      const adaBalance = Number(account?.total_balance || account?.utxo || 0);
-      adaBalanceEl.textContent = Number.isFinite(adaBalance) && adaBalance > 0
-        ? formatAdaExact(adaBalance, 2)
-        : '0.00 ₳';
+    if (txsEl) {
+      txsEl.textContent = Number.isFinite(counts?.txCount) && counts.txCount > 0 ? counts.txCount.toLocaleString() : '0';
     }
 
-    if (rewardsEl) {
-      rewardsEl.textContent = Number.isFinite(estimatedRewards) && estimatedRewards > 0
-        ? `${formatAdaExact(Math.round(estimatedRewards), 2)} / year`
-        : '—';
+    if (ftsEl) {
+      ftsEl.textContent = Number.isFinite(counts?.ftCount) && counts.ftCount > 0 ? counts.ftCount.toLocaleString() : '0';
     }
 
-    if (flowmassEl) {
-      flowmassEl.textContent = Number.isFinite(flowmassCount) && flowmassCount > 0 ? `${flowmassCount}` : '0';
-    }
-
-    if (statusEl) {
-      if (!account?.delegated_pool) {
-        statusEl.textContent = 'Not delegated';
-      } else if (isDelegatedToPreeb(account?.delegated_pool, walletState.delegatedPoolTicker)) {
-        statusEl.textContent = 'Delegated to PREEB';
-      } else {
-        statusEl.textContent = 'Delegated elsewhere';
-      }
+    if (nftsEl) {
+      nftsEl.textContent = Number.isFinite(counts?.nftCount) && counts.nftCount > 0 ? counts.nftCount.toLocaleString() : '0';
     }
 
     if (apy3e) apy3e.textContent = formatApyPercent(apyWindows?.epochs3);
@@ -1387,8 +1371,28 @@
       walletState.delegatedPoolTicker = null;
     }
 
-    const estimatedRewards = calculateEstimatedAnnualPreebRewards(account, apyWindows?.epochs3);
-    renderWalletSummaryStats(account, apyWindows, estimatedRewards, walletState.flowmassCount ?? 0);
+    const counts = {
+      txCount: Number(account?.tx_count ?? account?.transaction_count ?? 0),
+      ftCount: 0,
+      nftCount: 0,
+    };
+
+    try {
+      const assets = await walletState.api?.getAssets?.();
+      if (assets && typeof assets === 'object') {
+        const assetEntries = Object.entries(assets || {});
+        const policyEntries = assetEntries.filter(([assetId]) => assetId && assetId.length > 56);
+        const ftCount = policyEntries.filter(([assetId, qty]) => Number(qty) > 0 && assetId.split('.').length > 1).length;
+        const nftCount = policyEntries.filter(([assetId, qty]) => Number(qty) > 0 && assetId.split('.').length === 1).length;
+        counts.ftCount = ftCount;
+        counts.nftCount = nftCount;
+      }
+    } catch {
+      counts.ftCount = 0;
+      counts.nftCount = 0;
+    }
+
+    renderWalletSummaryStats(account, apyWindows, counts);
     await loadWalletRoleEligibility();
 
     const walletGrid = document.getElementById('wallet-grid');
