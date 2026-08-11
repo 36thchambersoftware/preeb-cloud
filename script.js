@@ -755,6 +755,22 @@
     return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
   }
 
+  async function loadStakeHistory(stakeAddress) {
+    if (!stakeAddress) return [];
+
+    const rows = await fetchKoiosJson('/account_stake_history', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ _stake_addresses: [stakeAddress] }),
+    });
+
+    if (!Array.isArray(rows)) return [];
+    return rows.filter((entry) => entry && typeof entry === 'object');
+  }
+
   async function loadPoolTickerByBech32(poolBech32) {
     if (!poolBech32) return null;
     if (poolBech32 === POOL_ID_BECH32) return POOL_TICKER;
@@ -1274,7 +1290,7 @@
       .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
   }
 
-  function getDelegationStartEpoch(account) {
+  function getDelegationStartEpoch(account, stakeHistory) {
     const candidateSources = [
       account?.delegated_since,
       account?.delegated_since_epoch,
@@ -1291,6 +1307,26 @@
     for (const value of candidateSources) {
       const parsed = Number(value);
       if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+
+    const historyEntries = Array.isArray(stakeHistory) ? stakeHistory : [];
+    const delegatedPool = String(account?.delegated_pool || '').trim().toLowerCase();
+
+    const matchingEntries = historyEntries.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const entryPool = String(entry.pool_id_bech32 || entry.pool_id || '').trim().toLowerCase();
+      if (!delegatedPool) return true;
+      return entryPool === delegatedPool;
+    });
+
+    if (matchingEntries.length > 0) {
+      const epochs = matchingEntries
+        .map((entry) => Number(entry.epoch_no ?? entry.epoch ?? entry.epochNumber ?? NaN))
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+      if (epochs.length > 0) {
+        return Math.min(...epochs);
+      }
     }
 
     return null;
@@ -1319,10 +1355,10 @@
     return null;
   }
 
-  function formatDelegationDuration(account, currentEpoch) {
+  function formatDelegationDuration(account, currentEpoch, stakeHistory) {
     if (!account?.delegated_pool) return 'Not currently delegated';
 
-    const startEpoch = getDelegationStartEpoch(account);
+    const startEpoch = getDelegationStartEpoch(account, stakeHistory);
     const epochNow = getCurrentEpoch(account, currentEpoch);
 
     if (!Number.isFinite(startEpoch)) {
@@ -1350,8 +1386,8 @@
     return `${epochLabel} (~${years.toFixed(1)} years)`;
   }
 
-  function formatEpochsStaked(account, currentEpoch) {
-    const startEpoch = getDelegationStartEpoch(account);
+  function formatEpochsStaked(account, currentEpoch, stakeHistory) {
+    const startEpoch = getDelegationStartEpoch(account, stakeHistory);
     const epochNow = getCurrentEpoch(account, currentEpoch);
 
     if (!account?.delegated_pool) return 'Not currently delegated';
@@ -1371,11 +1407,12 @@
 
     setWalletSyncState(true, 'Collecting wallet and delegation details...');
 
-    const [account, apyWindows, tipRows, walletHandles] = await Promise.all([
+    const [account, apyWindows, tipRows, walletHandles, stakeHistory] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
       loadPoolApyWindows(),
       fetchKoiosJson('/tip', { headers: { Accept: 'application/json' } }),
       loadWalletHandles(),
+      loadStakeHistory(walletState.stakeAddress),
     ]);
 
     const tip = Array.isArray(tipRows) ? tipRows[0] : tipRows;
@@ -1383,6 +1420,7 @@
 
     walletState.accountInfo = account;
     walletState.walletHandles = walletHandles;
+    walletState.stakeHistory = stakeHistory;
     walletState.delegatedPool = account?.delegated_pool || null;
     walletState.delegationVerified = true;
 
@@ -1468,7 +1506,7 @@
       }
     }
     if (walletEpochsStaked) {
-      walletEpochsStaked.textContent = formatEpochsStaked(account, currentEpoch);
+      walletEpochsStaked.textContent = formatEpochsStaked(account, currentEpoch, stakeHistory);
     }
 
     if (walletEarnedPanel) walletEarnedPanel.hidden = !delegatedToPreeb || !earnedAda;
