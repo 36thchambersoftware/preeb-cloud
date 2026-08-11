@@ -411,8 +411,13 @@
         </div>
 
         <div class="wallet-sync" id="wallet-sync" hidden aria-live="polite" aria-busy="true">
-          <span class="wallet-sync__spinner" aria-hidden="true"></span>
-          <span class="wallet-sync__text" id="wallet-sync-message">Waiting for delegation confirmation on chain...</span>
+          <div class="wallet-sync__spinner" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="wallet-sync__content">
+            <span class="wallet-sync__text" id="wallet-sync-message">Waiting for delegation confirmation on chain...</span>
+            <span class="wallet-sync__subtext">This can take a few moments while the wallet and network sync.</span>
+          </div>
         </div>
 
         <div class="wallet-spotlight" id="wallet-earned-panel" hidden>

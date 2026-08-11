@@ -154,10 +154,10 @@
   }
 
   const WALLET_ICON_MARKUP = {
-    eternl: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#ff7a00"></rect><path d="M22 18h20l-6 10h-8l-6-10Zm-6 14h32l-6 10H22l-6-10Zm10 14h12l-6 10-6-10Z" fill="#fff"></path></svg>',
-    vespr: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#6c4df6"></rect><path d="M20 18h24v10H28v8h12v10H28v8h16v10H20V18Z" fill="#fff"></path></svg>',
-    typhon: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#18c8c8"></rect><path d="M20 18h10l14 28 10-14h10l-20 38-20-38Z" fill="#fff"></path></svg>',
-    lace: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#111827"></rect><path d="M18 18h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Z" fill="#fff"></path></svg>',
+    eternl: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#fff7ed"></rect><path d="M18 16h28l-4 10H22l-4-10Zm-4 16h36l-4 10H18l-4-10Zm8 16h20l-4 10H22l-4-10Z" fill="#ff7a00"></path></svg>',
+    vespr: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#f5f3ff"></rect><path d="M18 18h28v10H28v8h12v10H28v8h16v10H18V18Z" fill="#6c4df6"></path></svg>',
+    typhon: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#ecfeff"></rect><path d="M20 18h10l14 28 10-14h10l-20 38-20-38Z" fill="#0f766e"></path></svg>',
+    lace: '<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#111827"></rect><path d="M18 18h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Zm0 16h28l-7 10H25l-7-10Z" fill="#ffffff"></path></svg>',
   };
 
   function getWalletIconMarkup(walletKey, walletLabel) {
@@ -1314,7 +1314,10 @@
 
     if (!account?.delegated_pool) return 'Not currently delegated';
     if (!Number.isFinite(startEpoch) || !Number.isFinite(epochNow) || epochNow < startEpoch) {
-      return startEpoch ? `${startEpoch} → ${epochNow}` : 'Epoch data unavailable';
+      if (Number.isFinite(startEpoch) && Number.isFinite(epochNow)) {
+        return `${startEpoch} → ${epochNow}`;
+      }
+      return 'Awaiting epoch data';
     }
 
     const epochs = Math.max(1, Math.floor(epochNow - startEpoch + 1));
@@ -1323,6 +1326,8 @@
 
   async function refreshWalletState() {
     if (!walletState.stakeAddress) return;
+
+    setWalletSyncState(true, 'Collecting wallet and delegation details...');
 
     const [account, apyWindows, tipRows, walletHandles] = await Promise.all([
       loadAccountInfo(walletState.stakeAddress),
@@ -1363,7 +1368,7 @@
     const walletEpochsStaked = document.getElementById('wallet-epochs-staked');
     const delegateBtn = document.getElementById('wallet-delegate-btn');
 
-    if (walletGrid) walletGrid.hidden = walletState.isSyncing;
+    if (walletGrid) walletGrid.hidden = false;
     renderWalletName();
     if (walletAddressFallback) walletAddressFallback.textContent = shortenAddress(walletState.stakeAddress);
     if (walletAddressHandles) {
@@ -1407,6 +1412,8 @@
       delegateBtn.disabled = !canDelegate;
       delegateBtn.style.display = canDelegate ? '' : 'none';
     }
+
+    setWalletSyncState(false, 'Wallet details loaded.');
 
     let earnedAda = null;
     if (walletEarnedLabel) walletEarnedLabel.textContent = 'ADA Already Earned With PREEB';
