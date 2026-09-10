@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/profile", "destination": "/profile.html" },
+    { "source": "/profile/:stake", "destination": "/profile.html" }
+  ]
+}

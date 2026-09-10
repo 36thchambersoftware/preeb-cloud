@@ -45,6 +45,10 @@
         <li><a href="#stats">Stats</a></li>
         <li><a href="#projects">Projects</a></li>
         <li><a href="#community">Community</a></li>
+        <li class="nav__profile-item">
+          <button type="button" class="btn btn--outline btn--sm" id="nav-profile-btn">My Profile</button>
+          <div class="nav-profile-menu" id="nav-profile-menu" hidden></div>
+        </li>
         <li><a href="#wallet" class="btn btn--outline btn--sm">Delegate</a></li>
       </ul>
       <button class="nav__hamburger" aria-label="Toggle menu" aria-expanded="false">
@@ -403,7 +407,6 @@
               via CIP-30.
             </p>
           </div>
-          <div class="wallet-buttons" id="wallet-buttons"></div>
         </div>
 
         <div class="wallet-status" id="wallet-status" role="status" aria-live="polite">
@@ -411,9 +414,13 @@
         </div>
 
         <div class="wallet-actions wallet-actions--top">
+          <div class="wallet-buttons" id="wallet-buttons"></div>
           <button class="btn btn--primary" id="wallet-delegate-btn" type="button" hidden disabled>
             Build &amp; Submit Delegation Tx
           </button>
+          <a class="btn btn--outline" id="wallet-profile-link" href="#wallet" hidden>
+            View My Profile
+          </a>
         </div>
 
         <div class="wallet-sync" id="wallet-sync" hidden aria-live="polite" aria-busy="true">

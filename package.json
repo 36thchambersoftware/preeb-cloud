@@ -1,0 +1,10 @@
+{
+  "name": "preeb-cloud",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "bech32": "^2.0.0",
+    "mongodb": "^6.10.0",
+    "tweetnacl": "^1.0.3"
+  }
+}

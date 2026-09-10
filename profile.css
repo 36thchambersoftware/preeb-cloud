@@ -1,0 +1,234 @@
+/* ================================================================
+   PREEB Delegator Profile — Page Styles
+   Scoped additions only; relies on variables/utilities from styles.css.
+   ================================================================ */
+
+.profile-page {
+  padding-top: var(--space-3xl);
+  padding-bottom: var(--space-3xl);
+  min-height: 70vh;
+}
+
+.profile-empty,
+.profile-loading {
+  text-align: center;
+  padding: var(--space-3xl) var(--space-lg);
+}
+
+.profile-empty h1 {
+  font-family: var(--font-heading);
+  font-size: 1.8rem;
+  margin-bottom: var(--space-md);
+}
+
+.profile-empty p {
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-lg);
+}
+
+.profile-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  color: var(--color-text-muted);
+}
+
+.profile-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xl);
+}
+
+/* ─── Hero Card ─── */
+.profile-card {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-2xl);
+  align-items: center;
+  background: linear-gradient(145deg, var(--color-bg-card), var(--color-bg-card-2));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2xl);
+}
+
+.profile-card__art img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 30px rgba(60, 200, 200, 0.25));
+}
+
+.profile-card__eyebrow {
+  display: inline-block;
+  font-family: var(--font-heading);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-cyan);
+  margin-bottom: var(--space-xs);
+}
+
+.profile-card__handle {
+  font-family: var(--font-heading);
+  font-size: 2rem;
+  margin-bottom: var(--space-xs);
+}
+
+.profile-card__address {
+  font-family: monospace;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: var(--space-sm);
+}
+
+.profile-card__role {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3em 1em;
+  border-radius: var(--radius-full);
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: var(--space-lg);
+}
+
+.profile-card__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.profile-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2em;
+}
+
+.profile-stat__label {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.profile-stat__value {
+  font-family: var(--font-heading);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.profile-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+/* ─── Sections ─── */
+.profile-section h2 {
+  font-family: var(--font-heading);
+  font-size: 1.3rem;
+  margin-bottom: var(--space-xs);
+}
+
+.profile-section__sub {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: var(--space-lg);
+}
+
+.profile-section__header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.profile-roles,
+.profile-achievements,
+.profile-wallets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-md);
+}
+
+.profile-roles li,
+.profile-achievements li,
+.profile-wallets li {
+  list-style: none;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-size: 0.9rem;
+}
+
+.profile-roles li.is-unlocked,
+.profile-achievements li.is-unlocked {
+  border-color: var(--color-cyan);
+  box-shadow: 0 0 0 1px rgba(60, 200, 200, 0.25) inset;
+}
+
+.profile-roles li.is-locked,
+.profile-achievements li.is-locked {
+  opacity: 0.5;
+}
+
+.profile-wallets li {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.profile-wallets li .profile-wallets__badge {
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  padding: 0.2em 0.6em;
+  border-radius: var(--radius-full);
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+  flex-shrink: 0;
+}
+
+.profile-link-status {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  background: rgba(60, 200, 200, 0.08);
+  border: 1px solid rgba(60, 200, 200, 0.28);
+  font-size: 0.9rem;
+}
+
+.profile-link-status.is-error {
+  background: rgba(255, 120, 120, 0.1);
+  border-color: rgba(255, 120, 120, 0.45);
+}
+
+.profile-link-choices {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+@media (max-width: 720px) {
+  .profile-card {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .profile-card__art {
+    max-width: 180px;
+    margin-inline: auto;
+  }
+  .profile-card__stats {
+    grid-template-columns: 1fr 1fr;
+  }
+  .profile-card__actions {
+    justify-content: center;
+  }
+}

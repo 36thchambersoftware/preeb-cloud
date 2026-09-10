@@ -1,4 +1,21 @@
+import { applyCors, checkRateLimit, getClientIp, rejectRateLimited } from '../_lib/security.js';
+
 const KOIOS_BASE = 'https://api.koios.rest/api/v1';
+
+// Only these Koios endpoints are ever called by script.js/profile.js. This
+// keeps the proxy from being usable as a generic, key-less Koios mirror for
+// unrelated traffic (which would otherwise eat our Koios rate limits/costs).
+const ALLOWED_ENDPOINTS = new Set([
+  'tip',
+  'pool_info',
+  'pool_list',
+  'pool_history',
+  'account_info',
+  'account_stake_history',
+  'account_rewards',
+  'account_assets',
+  'cli_protocol_params',
+]);
 
 function toHeaderObject(headers) {
   const out = {};
@@ -19,14 +36,16 @@ function normalizeSegments(input) {
 }
 
 export default async function handler(req, res) {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  applyCors(req, res);
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
+    return;
+  }
+
+  const rateLimit = checkRateLimit(`koios:${getClientIp(req)}`, { limit: 60, windowMs: 60_000 });
+  if (!rateLimit.allowed) {
+    rejectRateLimited(res, rateLimit.retryAfterSeconds);
     return;
   }
 
@@ -55,6 +74,12 @@ export default async function handler(req, res) {
 
   if (!targetPath) {
     res.status(400).json({ error: 'Missing Koios path. Use /api/koios/<endpoint>' });
+    return;
+  }
+
+  const endpointName = segments[0];
+  if (!ALLOWED_ENDPOINTS.has(endpointName)) {
+    res.status(403).json({ error: `Koios endpoint "${endpointName}" is not permitted through this proxy.` });
     return;
   }
 

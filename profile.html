@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PREEB Delegator Profile</title>
+  <meta name="description" content="View combined delegation stats, PREEB roles, and achievements for a connected wallet." />
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#0A0E1A" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/profile.css" />
+</head>
+<body>
+
+  <!-- ─────────── NAV ─────────── -->
+  <nav class="nav" id="top">
+    <div class="nav__inner container">
+      <a href="/#top" class="nav__logo">
+        <span class="logo-ticker">PREEB</span>
+        <span class="logo-sub">Cardano Pool</span>
+      </a>
+      <ul class="nav__links">
+        <li><a href="/#wallet" class="btn btn--outline btn--sm">Back to Main Site</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="section profile-page">
+    <div class="container">
+
+      <div id="profile-empty" class="profile-empty" hidden>
+        <h1>No wallet connected yet</h1>
+        <p>Connect a wallet from the main site to generate your PREEB profile.</p>
+        <a href="/#wallet" class="btn btn--primary btn--lg">Connect a Wallet</a>
+      </div>
+
+      <div id="profile-gate" class="profile-empty" hidden>
+        <h1>Verify wallet ownership</h1>
+        <p>To view this profile, connect the wallet it belongs to and approve a signature request. This proves you own it — no transaction or fees required.</p>
+        <div class="profile-link-choices" id="profile-gate-choices"></div>
+        <div class="profile-link-status" id="profile-gate-status" hidden></div>
+      </div>
+
+      <div id="profile-loading" class="profile-loading" hidden>
+        <div class="wallet-sync__spinner" aria-hidden="true"><span></span><span></span><span></span></div>
+        <p>Loading delegator profile...</p>
+      </div>
+
+      <div id="profile-content" class="profile-content" hidden>
+
+        <section class="profile-card" id="profile-card">
+          <div class="profile-card__art">
+            <img id="profile-role-image" src="/images/preebot.png" alt="PREEB role badge" />
+          </div>
+          <div class="profile-card__body">
+            <span class="profile-card__eyebrow">PREEB Delegator Profile</span>
+            <h1 class="profile-card__handle" id="profile-handle">—</h1>
+            <p class="profile-card__address" id="profile-address">—</p>
+            <div class="profile-card__role" id="profile-role-name">Not Yet Delegated</div>
+
+            <div class="profile-card__stats">
+              <div class="profile-stat">
+                <span class="profile-stat__label">Combined ADA (delegated to PREEB)</span>
+                <span class="profile-stat__value" id="profile-ada-delegated">—</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat__label">Combined ADA (all linked wallets)</span>
+                <span class="profile-stat__value" id="profile-ada-total">—</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat__label">Epochs Delegated to PREEB</span>
+                <span class="profile-stat__value" id="profile-epochs">—</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat__label">Linked Wallets</span>
+                <span class="profile-stat__value" id="profile-wallet-count">—</span>
+              </div>
+            </div>
+
+            <div class="profile-card__actions">
+              <button class="btn btn--primary" id="profile-download-btn" type="button">Download Profile Card (PNG)</button>
+              <button class="btn btn--twitter" id="profile-share-btn" type="button">Share on X</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="profile-section">
+          <h2>Delegator Roles</h2>
+          <p class="profile-section__sub">Based on combined ADA currently delegated to PREEB across all linked wallets.</p>
+          <ul class="profile-roles" id="profile-roles-list"></ul>
+        </section>
+
+        <section class="profile-section">
+          <h2>Achievements</h2>
+          <p class="profile-section__sub">Unlocked based on how long you've been continuously delegated to PREEB.</p>
+          <ul class="profile-achievements" id="profile-achievements-list"></ul>
+        </section>
+
+        <section class="profile-section">
+          <div class="profile-section__header-row">
+            <div>
+              <h2>Linked Wallets</h2>
+              <p class="profile-section__sub">All wallets combined into this profile's stats.</p>
+            </div>
+            <button class="btn btn--outline btn--sm" id="profile-link-wallet-btn" type="button">+ Link Another Wallet</button>
+          </div>
+          <ul class="profile-wallets" id="profile-wallets-list"></ul>
+          <div class="profile-link-status" id="profile-link-status" hidden></div>
+          <div class="profile-link-choices" id="profile-link-choices" hidden></div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <canvas id="profile-canvas" width="1200" height="630" hidden></canvas>
+
+  <!-- ─────────── FOOTER ─────────── -->
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <span class="logo-ticker">PREEB</span>
+        <span class="footer__tagline">Decentralize Cardano. Earn Rewards.</span>
+      </div>
+      <nav class="footer__links" aria-label="Footer navigation">
+        <a href="https://discord.gg/nN5xb7zH7d" target="_blank" rel="noopener">Discord</a>
+        <a href="https://x.com/PREEB_Pool" target="_blank" rel="noopener">@PREEB_Pool</a>
+      </nav>
+    </div>
+    <div class="footer__bottom">
+      <div class="container">
+        <p class="footer__copyright">© <span id="year"></span> PREEB Pool. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/profile.js"></script>
+</body>
+</html>
