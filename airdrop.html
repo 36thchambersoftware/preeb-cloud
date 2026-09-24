@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PREEB Airdrop Calculator</title>
+  <meta name="description" content="PREEB ADA airdrop calculator with holder upload support, policy ID entry, and fee preview." />
+  <link rel="canonical" href="https://preeb.cloud/airdrop" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/airdrop.css" />
+</head>
+<body>
+  <nav class="nav" id="top">
+    <div class="nav__inner container">
+      <a href="/" class="nav__logo">
+        <span class="logo-ticker">PREEB</span>
+        <span class="logo-sub">A Cardano Stake Pool</span>
+      </a>
+      <ul class="nav__links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="/#community">Community</a></li>
+        <li><a href="/airdrop" aria-current="page">Airdrop</a></li>
+      </ul>
+      <button class="nav__hamburger" aria-label="Toggle menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <main>
+    <section class="airdrop-hero">
+      <div class="container airdrop-hero__inner">
+        <div>
+          <span class="section__eyebrow">Cardano Airdrop Tool</span>
+          <h1 class="section__title airdrop-hero__title">Airdrop to Cardano holders</h1>
+          <p class="section__subtitle airdrop-hero__subtitle">
+            Upload a JSON holders file or paste a policy ID and calculate a preview before airdrop.
+          </p>
+        </div>
+        <div class="airdrop-hero__note">
+          <div class="airdrop-hero__chip">Thank You Wallet</div>
+          <p>$preebot</p>
+          <code>addr1qxpxx5xgkqxm42sw2pzx68hjf3v8n6d3nhv7leyxgnre0n2rq7ll2fcjhuqdrtfdwufjmcx42mtgsgz299gmv74w3w5q6zeyv2</code>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--mid">
+      <div class="container airdrop-layout">
+        <div class="airdrop-card airdrop-card--primary">
+          <div class="airdrop-card__header">
+            <h2>Calculator</h2>
+            <span class="airdrop-pill">ADA only</span>
+          </div>
+
+          <div class="airdrop-mode-switch" role="tablist" aria-label="Airdrop input mode">
+            <button type="button" class="airdrop-mode-switch__button is-active" data-mode="upload" role="tab" aria-selected="true">
+              Upload holders JSON
+            </button>
+            <button type="button" class="airdrop-mode-switch__button" data-mode="policy" role="tab" aria-selected="false">
+              Policy ID / holder list
+            </button>
+          </div>
+
+          <div id="airdrop-upload-panel" class="airdrop-panel is-visible">
+            <label class="field-label" for="holder-file">Upload holders file</label>
+            <input id="holder-file" type="file" accept="application/json,.json" />
+
+            <label class="field-label" for="holder-json">Or paste JSON</label>
+            <textarea id="holder-json" placeholder='[
+  { "address": "addr1...", "amount": 1 },
+  { "address": "addr1...", "amount": 3 }
+]'></textarea>
+            <p id="holder-json-status" class="field-status" hidden></p>
+          </div>
+
+          <div id="airdrop-policy-panel" class="airdrop-panel" hidden>
+            <label class="field-label" for="policy-id-input">Policy ID</label>
+            <input id="policy-id-input" type="text" placeholder="Paste a 56-character policy ID or 112-character asset ID" />
+          </div>
+
+          <div class="airdrop-form-grid">
+            <div>
+              <label class="field-label" for="budget-ada">Airdrop budget (ADA)</label>
+              <input id="budget-ada" type="number" min="0" step="0.01" value="100" />
+            </div>
+            <div>
+              <label class="field-label" for="amount-mode">Distribution mode</label>
+              <select id="amount-mode">
+                <option value="weighted" selected>Per-NFT allocation (proportional)</option>
+                <option value="equal">Equal split across valid holders</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="thank-you-ada">Thank you (ADA)</label>
+              <input id="thank-you-ada" type="number" min="0" step="0.01" value="0" />
+              <p class="thank-you-note">Optional gifts help fund future tools like this and rewards for PREEB delegators.</p>
+            </div>
+            <div class="delegate-option">
+              <span class="field-label">Delegate to PREEB</span>
+              <label class="delegate-option__control" for="delegate-to-preeb">
+                <input id="delegate-to-preeb" type="checkbox" />
+                <span class="delegate-option__switch" aria-hidden="true"></span>
+                <span>Delegate to PREEB</span>
+              </label>
+              <p class="thank-you-note">Optional. Your wallet remains fully under your control.</p>
+            </div>
+            <div class="airdrop-note-field">
+              <label class="field-label" for="airdrop-note">Transaction note</label>
+              <textarea id="airdrop-note" placeholder="Add a short note to this airdrop transaction"></textarea>
+              <p class="thank-you-note">Up to 135 bytes. “Airdrop courtesy of PREEB” is included within the 160-byte total.</p>
+            </div>
+          </div>
+
+          <p class="airdrop-calculation-note">
+            Proportional mode divides the requested payout budget by total NFT quantity, then multiplies that per-NFT amount by each wallet's holdings. Thank you is optional and added on top.
+          </p>
+
+          <div class="airdrop-actions">
+            <button type="button" class="btn btn--primary btn--lg" id="calculate-airdrop-btn">Calculate preview</button>
+            <button type="button" class="btn btn--ghost btn--lg" id="reset-airdrop-btn">Reset</button>
+          </div>
+
+        </div>
+
+        <aside class="airdrop-card airdrop-card--summary">
+          <div class="airdrop-card__header">
+            <h2>Summary</h2>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-stat">
+              <span class="summary-stat__label">Recipients</span>
+              <strong id="summary-recipients">0</strong>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Airdrop</span>
+              <strong id="summary-paid">0 ₳</strong>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Thank you</span>
+              <strong id="summary-fee">0 ₳</strong>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Skipped</span>
+              <strong id="summary-skipped">0</strong>
+            </div>
+            <div class="summary-stat summary-stat--wide">
+              <span class="summary-stat__label">Minimum valid payout</span>
+              <strong id="min-amount-ada">1 ₳ per recipient</strong>
+            </div>
+          </div>
+
+          <div class="airdrop-warning">
+            <h3>Important rules</h3>
+            <ul>
+              <li>Thank you is an optional payment to $preebot, added on top of the requested payout budget.</li>
+              <li>Dust recipients that would receive less than 1 ADA are skipped.</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section section--dark" id="airdrop-preview" tabindex="-1" aria-labelledby="airdrop-preview-title">
+      <div class="container">
+        <div class="airdrop-card airdrop-card--table">
+          <div class="airdrop-card__header airdrop-card__header--table">
+            <h2 id="airdrop-preview-title">Preview</h2>
+          </div>
+
+          <div class="table-wrap airdrop-preview-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Recipient</th>
+                  <th>NFTs held</th>
+                  <th>ADA payout</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="airdrop-preview-body">
+                <tr>
+                  <td colspan="4" class="empty-state">No data yet — calculate a preview to populate the list.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <details class="skipped-list" id="airdrop-skipped-list" hidden>
+            <summary>Skipped recipients <span id="skipped-list-count">0</span></summary>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Recipient</th>
+                    <th>NFTs held</th>
+                    <th>Calculated payout</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="airdrop-skipped-body"></tbody>
+              </table>
+            </div>
+          </details>
+
+          <div class="airdrop-execution" aria-live="polite">
+            <div class="airdrop-execution__header">
+              <div>
+                <span class="airdrop-step__eyebrow">Next steps</span>
+                <h3>Build and send your airdrop</h3>
+              </div>
+              <span id="airdrop-wallet-status">Wallet not connected</span>
+            </div>
+            <ol class="airdrop-step-list">
+              <li class="airdrop-step is-complete" data-step="preview">
+                <span class="airdrop-step__number">1</span>
+                <span>Calculate preview</span>
+              </li>
+              <li class="airdrop-step" data-step="build">
+                <span class="airdrop-step__number">2</span>
+                <span>Check wallet and build</span>
+              </li>
+              <li class="airdrop-step" data-step="sign">
+                <span class="airdrop-step__number">3</span>
+                <span>Sign and submit</span>
+              </li>
+            </ol>
+            <div class="airdrop-actions">
+              <button type="button" class="btn btn--outline btn--lg" id="airdrop-prepare-btn" hidden disabled>Check wallet and build first batch</button>
+              <button type="button" class="btn btn--primary btn--lg" id="airdrop-sign-btn" hidden disabled>Sign and submit transaction</button>
+            </div>
+            <p id="airdrop-execution-message" class="airdrop-execution__message">Calculate a preview to unlock the wallet check.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/script.js"></script>
+  <script src="/airdrop.js?v=3"></script>
+</body>
+</html>

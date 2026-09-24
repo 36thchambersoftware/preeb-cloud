@@ -1,0 +1,536 @@
+:root {
+  --color-bg: #0a0e1a;
+  --color-bg-mid: #0f1525;
+  --color-bg-card: #151c30;
+  --color-border: rgba(255,255,255,0.08);
+  --color-cyan: #3cc8c8;
+  --color-cyan-dim: rgba(60,200,200,0.15);
+  --color-text: #e8ecf2;
+  --color-text-muted: #7f8ea8;
+  --color-gold: #f6a623;
+  --color-danger: #ff7d7d;
+  --color-success: #5ad98d;
+}
+
+.airdrop-hero {
+  padding: 5rem 0 2rem;
+  background:
+    radial-gradient(circle at top right, rgba(60, 200, 200, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(15,21,37,0.96), rgba(10,14,26,1));
+}
+
+.airdrop-hero__inner {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 2rem;
+  align-items: center;
+}
+
+.airdrop-hero__title {
+  margin-top: 0.75rem;
+}
+
+.airdrop-hero__subtitle {
+  max-width: 760px;
+}
+
+.airdrop-hero__note {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  padding: 1.25rem;
+}
+
+.airdrop-hero__chip {
+  display: inline-block;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(60,200,200,0.12);
+  color: var(--color-cyan);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.airdrop-hero__note p {
+  margin-top: 0.8rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.airdrop-hero__note code {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.airdrop-layout {
+  display: grid;
+  grid-template-columns: 1.35fr 0.65fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.airdrop-card {
+  background: rgba(21, 28, 48, 0.96);
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  padding: 1.5rem;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.18);
+}
+
+.airdrop-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.airdrop-card__header h2 {
+  font-size: 1.5rem;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.airdrop-pill {
+  display: inline-block;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(246,166,35,0.12);
+  border: 1px solid rgba(246,166,35,0.4);
+  color: var(--color-gold);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.airdrop-mode-switch {
+  display: inline-flex;
+  width: 100%;
+  padding: 0.25rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  margin-bottom: 1.25rem;
+}
+
+.airdrop-mode-switch__button {
+  width: 50%;
+  padding: 0.75rem 0.85rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.airdrop-mode-switch__button.is-active {
+  background: rgba(60,200,200,0.12);
+  color: var(--color-cyan);
+}
+
+.airdrop-panel {
+  display: none;
+}
+
+.airdrop-panel.is-visible {
+  display: block;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+input, textarea, select {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(9, 13, 23, 0.8);
+  color: var(--color-text);
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+  margin-bottom: 1rem;
+}
+
+textarea {
+  min-height: 160px;
+  resize: vertical;
+}
+
+textarea.is-invalid {
+  border-color: rgba(255,125,125,0.8);
+  box-shadow: 0 0 0 1px rgba(255,125,125,0.2);
+}
+
+textarea.is-valid {
+  border-color: rgba(90,217,141,0.8);
+  box-shadow: 0 0 0 1px rgba(90,217,141,0.2);
+}
+
+.field-status {
+  margin: -0.5rem 0 1rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.field-status.is-error {
+  color: var(--color-danger);
+}
+
+.field-status.is-success {
+  color: var(--color-success);
+}
+
+.thank-you-note {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  margin: -0.45rem 0 1rem;
+}
+
+.delegate-option__control {
+  align-items: center;
+  color: var(--color-text);
+  display: flex;
+  gap: 0.6rem;
+  min-height: 2.9rem;
+}
+
+.delegate-option__control input {
+  appearance: none;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.delegate-option__switch {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  flex: 0 0 2.6rem;
+  height: 1.45rem;
+  position: relative;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.delegate-option__switch::after {
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  content: '';
+  height: 1.05rem;
+  left: 0.16rem;
+  position: absolute;
+  top: 0.14rem;
+  transition: transform 160ms ease, background 160ms ease;
+  width: 1.05rem;
+}
+
+.delegate-option__control input:checked + .delegate-option__switch {
+  background: rgba(60,200,200,0.2);
+  border-color: var(--color-cyan);
+}
+
+.delegate-option__control input:checked + .delegate-option__switch::after {
+  background: var(--color-cyan);
+  transform: translateX(1.12rem);
+}
+
+.delegate-option__control input:focus-visible + .delegate-option__switch {
+  outline: 2px solid var(--color-cyan);
+  outline-offset: 3px;
+}
+
+.airdrop-note-field {
+  grid-column: 1 / -1;
+}
+
+.airdrop-note-field textarea {
+  min-height: 5.5rem;
+}
+
+.airdrop-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.airdrop-form-grid--compact {
+  margin-top: 0.25rem;
+}
+
+.airdrop-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.airdrop-execution {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 1.25rem;
+}
+
+.airdrop-execution__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.airdrop-execution__header h3 {
+  font-size: 1rem;
+}
+
+.airdrop-step__eyebrow {
+  color: var(--color-cyan);
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+.airdrop-step-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.airdrop-step {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.airdrop-step.is-complete {
+  color: var(--color-success);
+}
+
+.airdrop-step.is-active {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.airdrop-step__number {
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  display: inline-flex;
+  flex: 0 0 1.5rem;
+  height: 1.5rem;
+  justify-content: center;
+  width: 1.5rem;
+}
+
+#airdrop-wallet-status {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.airdrop-execution__message {
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin-top: 0.75rem;
+}
+
+.airdrop-execution__message.is-error {
+  color: var(--color-danger);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.summary-stat {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 0.9rem 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.summary-stat--wide {
+  grid-column: 1 / -1;
+}
+
+.summary-stat__label {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.summary-stat strong {
+  font-size: 1.1rem;
+}
+
+.airdrop-warning {
+  margin-top: 1.25rem;
+  background: rgba(246,166,35,0.06);
+  border: 1px solid rgba(246,166,35,0.28);
+  border-radius: 14px;
+  padding: 1rem 1.05rem;
+}
+
+.airdrop-warning h3 {
+  font-size: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.airdrop-warning ul {
+  list-style: disc;
+  padding-left: 1.1rem;
+}
+
+.airdrop-warning li {
+  color: var(--color-text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.airdrop-card--table {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2rem);
+}
+
+.airdrop-card__header--table {
+  margin-bottom: 1rem;
+}
+
+.skipped-list {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 1rem;
+}
+
+.skipped-list summary {
+  color: var(--color-gold);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.skipped-list summary span {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin-left: 0.35rem;
+}
+
+.skipped-list .table-wrap {
+  margin-top: 0.85rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.airdrop-preview-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.airdrop-preview-table-wrap thead th {
+  background: var(--color-bg-card);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.airdrop-execution {
+  background: var(--color-bg-card);
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 540px;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.9rem 0.8rem;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+th {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+tbody tr:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+.empty-state {
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.32rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.status-badge--valid {
+  background: rgba(90,217,141,0.1);
+  color: var(--color-success);
+}
+
+.status-badge--skipped {
+  background: rgba(255,125,125,0.12);
+  color: var(--color-danger);
+}
+
+@media (max-width: 860px) {
+  .airdrop-hero__inner,
+  .airdrop-layout,
+  .airdrop-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .airdrop-actions {
+    flex-direction: column;
+  }
+
+  .airdrop-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

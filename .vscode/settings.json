@@ -1,0 +1,5 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "npx --yes vercel@59.23.1": true
+    }
+}

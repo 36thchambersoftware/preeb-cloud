@@ -2117,4 +2117,15 @@
   initWalletUi();
   initNavProfileButton();
 
+  window.PreebWallet = {
+    getAvailableWallets,
+    async enable(walletConfig) {
+      const provider = walletConfig?.provider || window.cardano?.[walletConfig?.key];
+      if (!provider || typeof provider.enable !== 'function') {
+        throw new Error(`${walletConfig?.label || 'Selected wallet'} is not available in this browser`);
+      }
+      return provider.enable();
+    },
+  };
+
 })();
