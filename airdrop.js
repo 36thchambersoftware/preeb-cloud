@@ -15,6 +15,7 @@
   const holderJsonInput = document.getElementById('holder-json');
   const policyIdInput = document.getElementById('policy-id-input');
   const policyAddressesInput = document.getElementById('policy-addresses');
+  const policyHolderJsonOutput = document.getElementById('policy-holder-json');
   const budgetInput = document.getElementById('budget-ada');
   const amountModeInput = document.getElementById('amount-mode');
   const thankYouInput = document.getElementById('thank-you-ada');
@@ -58,6 +59,15 @@
     return `${address.slice(0, 18)}...${address.slice(-10)}`;
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function normalizeRows(rawInput) {
     if (rawInput == null) return [];
 
@@ -86,7 +96,7 @@
 
     const rawAmount = entry.amount ?? entry.quantity ?? entry.qty ?? entry.value;
     if (rawAmount === undefined || rawAmount === null || rawAmount === '') {
-      throw new Error(`${sourceName} row ${index + 1} is missing a positive numeric amount. Use "amount" or "quantity" with a number greater than 0.`);
+      return { address };
     }
 
     const amount = Number(rawAmount);
@@ -669,10 +679,15 @@
     }
   }
 
-  function populateHolderJsonFromRows(rows) {
-    if (!holderJsonInput) return;
+  function populateHolderJsonFromRows(rows, includeAmounts = false) {
     const normalizedRows = cloneNormalizedHolderRows(rows);
-    holderJsonInput.value = JSON.stringify(normalizedRows, null, 2);
+    const exportRows = includeAmounts
+      ? normalizedRows
+      : normalizedRows.map(({ address }) => ({ address }));
+    const json = JSON.stringify(exportRows, null, 2);
+
+    if (holderJsonInput) holderJsonInput.value = json;
+    if (policyHolderJsonOutput) policyHolderJsonOutput.value = json;
   }
 
   async function fetchPolicyHolderRows(policyId) {
@@ -741,7 +756,7 @@
 
   function formatJsonError(error, sourceLabel) {
     const rawMessage = error instanceof Error ? error.message : String(error || 'Unknown JSON error');
-    return `${sourceLabel} is invalid JSON: ${rawMessage}. Fix the formatting and use an array of objects with a valid address and positive numeric amount.`;
+    return `${sourceLabel} is invalid JSON: ${rawMessage}. Fix the formatting and use an array of objects with a valid address and an optional positive numeric amount.`;
   }
 
   function getSafeSingleBatchRecipientLimit(protocolLike = null) {
@@ -833,7 +848,6 @@
         }
 
         assertSafeSingleBatchRecipientCount(rows);
-        populateHolderJsonFromRows(rows);
         return rows;
       } catch (error) {
         if (error instanceof Error && /Pasted holder list|missing a valid address|positive numeric amount|not a valid object|No valid recipient rows|safe single-batch limit|Please split the list into two airdrops/.test(error.message)) {
@@ -884,9 +898,10 @@
     const validRows = rows
       .filter((row) => row && typeof row.address === 'string' && row.address.trim())
       .map((row) => {
-        const weight = Number(row.amount ?? row.quantity ?? row.qty ?? row.value ?? 0);
+        const suppliedWeight = row.amount ?? row.quantity ?? row.qty ?? row.value;
+        const weight = suppliedWeight == null || suppliedWeight === '' ? 1 : Number(suppliedWeight);
         if (!Number.isFinite(weight) || weight <= 0) {
-          throw new Error(`One or more holder rows have an invalid amount. The amount must be a positive number; the budget does not override your entered values.`);
+          throw new Error('One or more holder rows have an invalid amount. Use a positive number when an amount is provided.');
         }
         return {
           address: row.address.trim(),
@@ -977,7 +992,7 @@
       const awardText = displayedAmount > 0 ? formatAda(displayedAmount) : '0.00 ₳';
       return `
         <tr>
-          <td title="${row.address}">${formatAddress(row.address)}</td>
+          <td title="${escapeHtml(row.address)}">${escapeHtml(formatAddress(row.address))}</td>
           <td>${Number(row.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
           <td>${awardText}</td>
           <td><span class="status-badge ${statusClass}">${row.status}</span></td>
@@ -1012,10 +1027,10 @@
     previewSection.focus({ preventScroll: true });
   }
 
-  function calculateAirdrop() {
+  function calculateAirdrop({ scrollToPreview = true } = {}) {
     if (calculateBtn.disabled) return;
 
-    targetPreview();
+    if (scrollToPreview) targetPreview();
     updateExecutionSteps('preview');
     latestPreparedBatch = null;
     prepareBtn.hidden = true;
@@ -1036,8 +1051,10 @@
 
     rowsPromise
       .then((rows) => {
-        const manualBudget = validateManualAmountsAgainstBudget(rows, budgetAda);
-        const result = buildAirdropRows(rows, manualBudget, feeAda, minimumAda, mode);
+        const payoutBudgetAda = getMode() === 'policy'
+          ? budgetAda
+          : validateManualAmountsAgainstBudget(rows, budgetAda);
+        const result = buildAirdropRows(rows, payoutBudgetAda, feeAda, minimumAda, mode);
         latestPreviewResult = result;
         latestPreparedBatch = null;
         signBtn.disabled = true;
@@ -1061,7 +1078,7 @@
         signBtn.disabled = true;
         updateExecutionSteps('preview');
         setExecutionMessage(error.message || 'Unable to calculate the airdrop preview.', true);
-        previewBody.innerHTML = `<tr><td colspan="4" class="empty-state">${error.message || 'Unable to calculate the airdrop preview.'}</td></tr>`;
+        previewBody.innerHTML = `<tr><td colspan="4" class="empty-state">${escapeHtml(error.message || 'Unable to calculate the airdrop preview.')}</td></tr>`;
       })
       .finally(() => {
         calculateBtn.disabled = false;
@@ -1073,6 +1090,7 @@
     holderFileInput.value = '';
     holderJsonInput.value = '';
     policyIdInput.value = '';
+    if (policyHolderJsonOutput) policyHolderJsonOutput.value = '';
     if (policyAddressesInput) policyAddressesInput.value = '';
     budgetInput.value = '100';
     thankYouInput.value = '0';
@@ -1112,8 +1130,12 @@
       const parsed = JSON.parse(raw);
       const rows = validateRows(normalizeRows(parsed), 'Holders JSON');
       assertSafeSingleBatchRecipientCount(rows);
-      setHolderJsonValidationState(true, 'JSON looks valid. Ready to calculate the preview.');
-      setExecutionMessage('JSON looks valid. Ready to calculate the preview.');
+      const hasManualAmounts = rows.some((row) => row.amount != null);
+      const message = hasManualAmounts
+        ? 'JSON looks valid. Its explicit amounts must match the airdrop budget.'
+        : 'JSON looks valid. The calculator will allocate the airdrop budget across these addresses.';
+      setHolderJsonValidationState(true, message);
+      setExecutionMessage(message);
     } catch (error) {
       const message = error instanceof Error && /(safe single-batch limit|Please split the list into two airdrops)/.test(error.message)
         ? error.message
@@ -1130,6 +1152,7 @@
       const policyId = policyIdInput.value.trim();
       if (!policyId) {
         holderJsonInput.value = '';
+        if (policyHolderJsonOutput) policyHolderJsonOutput.value = '';
         setHolderJsonValidationState(false, '');
         setExecutionMessage('Enter a policy ID to load holders from Koios.');
         return;
@@ -1162,6 +1185,16 @@
     });
   }
 
+  let policyBudgetUpdateTimer = null;
+  budgetInput.addEventListener('input', () => {
+    invalidatePreparedTransaction('Airdrop budget changed. Recalculating the policy preview.');
+
+    if (getMode() !== 'policy' || !policyIdInput?.value.trim()) return;
+
+    if (policyBudgetUpdateTimer) clearTimeout(policyBudgetUpdateTimer);
+    policyBudgetUpdateTimer = setTimeout(() => calculateAirdrop({ scrollToPreview: false }), 250);
+  });
+
   delegateToPreebInput.addEventListener('change', () => {
     invalidatePreparedTransaction('Delegation preference changed. Rebuild the transaction to apply it.');
   });
@@ -1176,7 +1209,7 @@
     button.addEventListener('click', () => setMode(button.dataset.mode));
   });
 
-  calculateBtn.addEventListener('click', calculateAirdrop);
+  calculateBtn.addEventListener('click', () => calculateAirdrop());
   resetBtn.addEventListener('click', resetAirdropForm);
   prepareBtn.addEventListener('click', async () => {
     prepareBtn.disabled = true;

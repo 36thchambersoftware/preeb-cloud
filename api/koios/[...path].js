@@ -46,6 +46,12 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST, OPTIONS');
+    res.status(405).json({ error: 'Method not allowed.' });
+    return;
+  }
+
   const rateLimit = checkRateLimit(`koios:${getClientIp(req)}`, { limit: 60, windowMs: 60_000 });
   if (!rateLimit.allowed) {
     rejectRateLimited(res, rateLimit.retryAfterSeconds);
