@@ -110,7 +110,8 @@
 }
 
 .airdrop-mode-switch {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   width: 100%;
   padding: 0.25rem;
   background: rgba(255,255,255,0.03);
@@ -120,7 +121,7 @@
 }
 
 .airdrop-mode-switch__button {
-  width: 50%;
+  width: auto;
   padding: 0.75rem 0.85rem;
   border: 0;
   border-radius: 10px;
@@ -620,6 +621,10 @@ tbody tr:hover {
   .airdrop-hero__inner,
   .airdrop-layout,
   .airdrop-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .airdrop-mode-switch {
     grid-template-columns: 1fr;
   }
 

@@ -8,6 +8,8 @@ const KOIOS_BASE = 'https://api.koios.rest/api/v1';
 const PREEB_AIRDROP_SIGNATURE = 'Airdrop courtesy of PREEB';
 const PREEB_AIRDROP_METADATA_VERSION = 'v1';
 const REMAINDER_WALLET = 'addr1qxpxx5xgkqxm42sw2pzx68hjf3v8n6d3nhv7leyxgnre0n2rq7ll2fcjhuqdrtfdwufjmcx42mtgsgz299gmv74w3w5q6zeyv2';
+const PENDING_AIRDROP_TTL_MS = 24 * 60 * 60 * 1000;
+const PENDING_AIRDROP_RECHECK_LIMIT = 20;
 
 class TrackingError extends Error {
   constructor(message, status = 400) {
@@ -21,6 +23,7 @@ async function ensureIndexes(db) {
   try {
     await db.collection(AIRDROPS_COLLECTION).createIndex({ txHash: 1 }, { unique: true });
     await db.collection(AIRDROPS_COLLECTION).createIndex({ status: 1, submittedAt: -1 });
+    await db.collection(AIRDROPS_COLLECTION).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
   } catch (err) {
     console.warn('[PREEB] Could not ensure airdrop indexes (non-fatal):', err.message);
   }
@@ -107,13 +110,21 @@ async function verifyAirdropOnChain(txHash) {
   const inputAddresses = new Set(
     (utxos.inputs || []).map((input) => input?.payment_addr?.bech32).filter(Boolean)
   );
-  const payoutOutputs = (utxos.outputs || []).filter((output) => {
+  // Change is appended as the final output, so excluding it by index (not by address)
+  // keeps a payout to a sender who is also a recipient of their own airdrop.
+  const orderedOutputs = [...(utxos.outputs || [])].sort((left, right) => left.tx_index - right.tx_index);
+  const finalOutput = orderedOutputs[orderedOutputs.length - 1];
+  const changeIndex = finalOutput && inputAddresses.has(finalOutput?.payment_addr?.bech32)
+    ? finalOutput.tx_index
+    : null;
+  const payoutOutputs = orderedOutputs.filter((output) => {
     const address = output?.payment_addr?.bech32;
-    return address && address !== REMAINDER_WALLET && !inputAddresses.has(address);
+    return address && address !== REMAINDER_WALLET && output.tx_index !== changeIndex;
   });
   const recipientCount = payoutOutputs.length;
   const paidLovelace = payoutOutputs.reduce((total, output) => total + BigInt(output.value || 0), 0n).toString();
   const policyId = tracking.policy_id ? String(tracking.policy_id).toLowerCase() : null;
+  const poolId = tracking.pool_id ? String(tracking.pool_id).toLowerCase() : null;
 
   if (recipientCount === 0 || recipientCount > MAX_RECIPIENTS) {
     throw new TrackingError('Transaction has no verifiable airdrop recipient outputs.');
@@ -121,8 +132,9 @@ async function verifyAirdropOnChain(txHash) {
   if (
     parseNonNegativeInteger(tracking.recipient_count, 'metadata recipient count', MAX_RECIPIENTS) !== recipientCount ||
     parseLovelace(tracking.payout_lovelace, 'metadata payout') !== paidLovelace ||
-    !['upload', 'policy'].includes(tracking.mode) ||
-    (policyId && !/^[0-9a-f]{56}$/.test(policyId))
+    !['upload', 'policy', 'pool'].includes(tracking.mode) ||
+    (policyId && !/^[0-9a-f]{56}$/.test(policyId)) ||
+    (poolId && !/^pool1[0-9a-z]{51}$/.test(poolId))
   ) {
     throw new TrackingError('On-chain airdrop metadata does not match the verified transaction outputs.');
   }
@@ -137,6 +149,7 @@ async function verifyAirdropOnChain(txHash) {
     feeLovelace: parseLovelace(txInfo.fee, 'transaction fee'),
     mode: tracking.mode,
     policyId,
+    poolId,
     delegatedToPreeb: Array.isArray(txInfo.certificates) && txInfo.certificates.length > 0,
   };
 }
@@ -160,8 +173,8 @@ async function getPublicAirdropData(db) {
             },
           },
         ],
-        signed: [
-          { $match: { status: 'signed' } },
+        pending: [
+          { $match: { status: 'pending' } },
           { $count: 'count' },
         ],
         recent: [
@@ -176,6 +189,7 @@ async function getPublicAirdropData(db) {
               recipientCount: 1,
               paidLovelace: 1,
               policyId: 1,
+              poolId: 1,
               mode: 1,
               delegatedToPreeb: 1,
             },
@@ -194,11 +208,57 @@ async function getPublicAirdropData(db) {
       totalLovelace: totals.totalLovelace?.toString?.() || '0',
       totalFeeLovelace: totals.totalFeeLovelace?.toString?.() || '0',
       delegatedAirdrops: totals.delegatedAirdrops || 0,
-      signedAwaitingSubmission: result?.signed?.[0]?.count || 0,
+      pendingVerification: result?.pending?.[0]?.count || 0,
       policyIds,
     },
     airdrops: result?.recent || [],
   };
+}
+
+async function saveVerifiedAirdrop(collection, event) {
+  const { status, submittedAt, ...signedEvent } = event;
+  await collection.updateOne(
+    { txHash: event.txHash },
+    {
+      $setOnInsert: { ...signedEvent, createdAt: new Date() },
+      $set: { status, submittedAt, updatedAt: new Date() },
+      $unset: { expiresAt: '' },
+    },
+    { upsert: true }
+  );
+}
+
+async function savePendingAirdrop(collection, txHash) {
+  const now = new Date();
+  await collection.updateOne(
+    { txHash },
+    {
+      $setOnInsert: {
+        txHash,
+        status: 'pending',
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + PENDING_AIRDROP_TTL_MS),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function promotePendingAirdrops(db) {
+  const collection = db.collection(AIRDROPS_COLLECTION);
+  const pending = await collection.find({ status: 'pending' }, { projection: { txHash: 1 } })
+    .limit(PENDING_AIRDROP_RECHECK_LIMIT)
+    .toArray();
+
+  for (const record of pending) {
+    try {
+      await saveVerifiedAirdrop(collection, await verifyAirdropOnChain(record.txHash));
+    } catch (err) {
+      if (err instanceof TrackingError && err.status === 400) {
+        await collection.deleteOne({ _id: record._id, status: 'pending' });
+      }
+    }
+  }
 }
 
 export default async function handler(req, res) {
@@ -227,6 +287,7 @@ export default async function handler(req, res) {
     await ensureIndexes(db);
 
     if (req.method === 'GET') {
+      await promotePendingAirdrops(db);
       res.status(200).json(await getPublicAirdropData(db));
       return;
     }
@@ -234,20 +295,18 @@ export default async function handler(req, res) {
     let body = req.body;
     if (typeof body === 'string') body = JSON.parse(body);
     const txHash = parseTrackingRequest(body || {});
-    const event = await verifyAirdropOnChain(txHash);
     const collection = db.collection(AIRDROPS_COLLECTION);
 
-    const { status, submittedAt, ...signedEvent } = event;
-    await collection.updateOne(
-      { txHash: event.txHash },
-      {
-        $setOnInsert: { ...signedEvent, createdAt: new Date() },
-        $set: { status, submittedAt, updatedAt: new Date() },
-      },
-      { upsert: true }
-    );
+    try {
+      await saveVerifiedAirdrop(collection, await verifyAirdropOnChain(txHash));
+    } catch (err) {
+      if (!(err instanceof TrackingError) || err.status !== 409) throw err;
+      await savePendingAirdrop(collection, txHash);
+      res.status(202).json({ tracked: false, pending: true, txHash });
+      return;
+    }
 
-    res.status(202).json({ tracked: true, txHash: event.txHash });
+    res.status(202).json({ tracked: true, txHash });
   } catch (err) {
     console.error('[PREEB] /api/airdrop request failed:', err.message);
     res.status(err.status || 400).json({ error: err.message || 'Unable to track signed airdrop' });

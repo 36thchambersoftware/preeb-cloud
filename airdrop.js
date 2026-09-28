@@ -17,6 +17,8 @@
   const policyIdInput = document.getElementById('policy-id-input');
   const policyAddressesInput = document.getElementById('policy-addresses');
   const policyHolderJsonOutput = document.getElementById('policy-holder-json');
+  const poolIdInput = document.getElementById('pool-id-input');
+  const minDelegationInput = document.getElementById('min-delegation-ada');
   const budgetInput = document.getElementById('budget-ada');
   const amountModeInput = document.getElementById('amount-mode');
   const thankYouInput = document.getElementById('thank-you-ada');
@@ -29,6 +31,7 @@
 
   const uploadPanel = document.getElementById('airdrop-upload-panel');
   const policyPanel = document.getElementById('airdrop-policy-panel');
+  const poolPanel = document.getElementById('airdrop-pool-panel');
   const previewBody = document.getElementById('airdrop-preview-body');
   const previewSection = document.getElementById('airdrop-preview');
   const skippedList = document.getElementById('airdrop-skipped-list');
@@ -38,6 +41,8 @@
   const executionMessage = document.getElementById('airdrop-execution-message');
   const executionSteps = document.querySelectorAll('.airdrop-step');
   const holderJsonStatus = document.getElementById('holder-json-status');
+  const previewWeightTitle = document.getElementById('airdrop-preview-weight-title');
+  const calculationNote = document.getElementById('airdrop-calculation-note');
   const activityStats = document.getElementById('airdrop-activity-stats');
   const activityPolicyIds = document.getElementById('airdrop-activity-policies');
   const activityBody = document.getElementById('airdrop-activity-body');
@@ -144,11 +149,24 @@
     });
 
     const uploadVisible = mode === 'upload';
+    const policyVisible = mode === 'policy';
+    const poolVisible = mode === 'pool';
     uploadPanel.classList.toggle('is-visible', uploadVisible);
     uploadPanel.hidden = !uploadVisible;
 
-    policyPanel.classList.toggle('is-visible', !uploadVisible);
-    policyPanel.hidden = uploadVisible;
+    policyPanel.classList.toggle('is-visible', policyVisible);
+    policyPanel.hidden = !policyVisible;
+    poolPanel.classList.toggle('is-visible', poolVisible);
+    poolPanel.hidden = !poolVisible;
+
+    if (previewWeightTitle) {
+      previewWeightTitle.textContent = poolVisible ? 'Active stake (ADA)' : policyVisible ? 'NFTs held' : 'Weight';
+    }
+    if (calculationNote) {
+      calculationNote.textContent = poolVisible
+        ? 'Proportional mode divides the payout budget by total active stake, then allocates each eligible delegator their stake-weighted share. Equal split ignores stake size after the minimum active-stake filter.'
+        : 'Proportional mode divides the requested payout budget by total NFT quantity, then multiplies that per-NFT amount by each wallet\'s holdings. Thank you is optional and added on top.';
+    }
   }
 
   async function fetchKoiosJson(path, options = {}) {
@@ -263,6 +281,7 @@
       addTrackingField('payout_lovelace', trackingData.payoutLovelace);
       addTrackingField('mode', trackingData.mode);
       if (trackingData.policyId) addTrackingField('policy_id', trackingData.policyId);
+      if (trackingData.poolId) addTrackingField('pool_id', trackingData.poolId);
       metadata.insert(
         csl.BigNum.from_str('675'),
         csl.TransactionMetadatum.new_map(trackingMap)
@@ -378,16 +397,16 @@
           <td><a class="tx-link" href="https://cardanoscan.io/transaction/${encodeURIComponent(airdrop.txHash)}" target="_blank" rel="noreferrer" title="View ${escapeHtml(airdrop.txHash)} on Cardanoscan">${escapeHtml(formatAddress(airdrop.txHash))}</a></td>
           <td>${formatActivityAda(airdrop.paidLovelace)}</td>
           <td>${Number(airdrop.recipientCount || 0).toLocaleString()}</td>
-          <td>${airdrop.policyId ? `<code title="${escapeHtml(airdrop.policyId)}">${escapeHtml(formatAddress(airdrop.policyId))}</code>` : 'Upload list'}</td>
+          <td>${airdrop.policyId ? `<code title="${escapeHtml(airdrop.policyId)}">${escapeHtml(formatAddress(airdrop.policyId))}</code>` : airdrop.poolId ? `<code title="${escapeHtml(airdrop.poolId)}">${escapeHtml(formatAddress(airdrop.poolId))}</code>` : 'Upload list'}</td>
           <td>${airdrop.delegatedToPreeb ? 'PREEB' : 'None'}</td>
           <td>${escapeHtml(formatActivityDate(airdrop.submittedAt))}</td>
         </tr>
       `).join('')
       : '<tr><td colspan="6" class="empty-state">No submitted airdrops have been recorded yet.</td></tr>';
 
-    const awaiting = Number(stats.signedAwaitingSubmission || 0);
+    const awaiting = Number(stats.pendingVerification || 0);
     activityStatus.textContent = awaiting > 0
-      ? `${awaiting} signed transaction${awaiting === 1 ? '' : 's'} awaiting submission.`
+      ? `${awaiting} submitted transaction${awaiting === 1 ? '' : 's'} awaiting Cardano verification.`
       : 'Only wallet-submitted transactions are listed below.';
   }
 
@@ -707,6 +726,10 @@
       const policyId = getMode() === 'policy' && /^[0-9a-f]{56,112}$/.test(normalizedPolicyId)
         ? normalizedPolicyId.slice(0, 56)
         : null;
+      const normalizedPoolId = String(poolIdInput?.value || '').trim().toLowerCase();
+      const poolId = getMode() === 'pool' && /^pool1[0-9a-z]{51}$/.test(normalizedPoolId)
+        ? normalizedPoolId
+        : null;
       const trackedPayoutLovelace = validRows.reduce(
         (total, row) => total + BigInt(Math.floor(row.payoutAda * Number(LOVELACE_PER_ADA))),
         0n
@@ -716,6 +739,7 @@
         payoutLovelace: trackedPayoutLovelace.toString(),
         mode: getMode(),
         policyId,
+        poolId,
       });
       txBuilder.set_auxiliary_data(auxiliaryData);
       const utxos = csl.TransactionUnspentOutputs.new();
@@ -916,6 +940,63 @@
     return [];
   }
 
+  async function fetchPoolDelegatorRows(poolId, minimumStakeAda) {
+    const normalizedPoolId = String(poolId || '').trim().toLowerCase();
+    if (!/^pool1[0-9a-z]{51}$/.test(normalizedPoolId)) {
+      throw new Error('Enter a valid bech32 stake pool ID beginning with pool1.');
+    }
+
+    const minimumLovelace = BigInt(Math.ceil(Math.max(0, minimumStakeAda) * Number(LOVELACE_PER_ADA)));
+    const eligibleDelegators = [];
+    const pageSize = 1_000;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await fetchKoiosJson(
+        `pool_delegators?_pool_bech32=${encodeURIComponent(normalizedPoolId)}&limit=${pageSize}&offset=${offset}`
+      );
+      const delegators = Array.isArray(page) ? page : [];
+      delegators.forEach((delegator) => {
+        const stakeAddress = typeof delegator?.stake_address === 'string' ? delegator.stake_address.trim() : '';
+        const activeStake = String(delegator?.amount ?? '').trim();
+        if (!stakeAddress || !/^(0|[1-9]\d*)$/.test(activeStake)) return;
+        const stake = BigInt(activeStake);
+        if (stake >= minimumLovelace && stake > 0n) {
+          eligibleDelegators.push({ stakeAddress, activeStake: stake });
+        }
+      });
+      assertSafeSingleBatchRecipientCount(eligibleDelegators.map(({ stakeAddress }) => ({ address: stakeAddress })));
+      if (delegators.length < pageSize) break;
+    }
+
+    if (eligibleDelegators.length === 0) return [];
+
+    const addressByStake = new Map();
+    for (let index = 0; index < eligibleDelegators.length; index += 10) {
+      const stakeAddresses = eligibleDelegators.slice(index, index + 10).map(({ stakeAddress }) => stakeAddress);
+      const addressRows = await fetchKoiosJson('account_addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ _stake_addresses: stakeAddresses }),
+      });
+      (Array.isArray(addressRows) ? addressRows : []).forEach((row) => {
+        const stakeAddress = typeof row?.stake_address === 'string' ? row.stake_address.trim() : '';
+        const paymentAddress = Array.isArray(row?.addresses) ? String(row.addresses[0] || '').trim() : '';
+        if (stakeAddress && /^addr1[0-9a-z]+$/.test(paymentAddress)) {
+          addressByStake.set(stakeAddress, paymentAddress);
+        }
+      });
+    }
+
+    const unresolved = eligibleDelegators.filter(({ stakeAddress }) => !addressByStake.has(stakeAddress));
+    if (unresolved.length > 0) {
+      throw new Error(`Koios could not resolve a payment address for ${unresolved.length} eligible delegator(s). Try again later.`);
+    }
+
+    return eligibleDelegators.map(({ stakeAddress, activeStake }) => ({
+      address: addressByStake.get(stakeAddress),
+      amount: Number(activeStake) / Number(LOVELACE_PER_ADA),
+    }));
+  }
+
   function formatJsonError(error, sourceLabel) {
     const rawMessage = error instanceof Error ? error.message : String(error || 'Unknown JSON error');
     return `${sourceLabel} is invalid JSON: ${rawMessage}. Fix the formatting and use an array of objects with a valid address and an optional positive numeric amount.`;
@@ -995,6 +1076,10 @@
       }
 
       return [];
+    }
+
+    if (mode === 'pool') {
+      return fetchPoolDelegatorRows(poolIdInput.value, parseBudget(minDelegationInput.value));
     }
 
     const policyId = (policyIdInput.value || '').trim();
@@ -1213,7 +1298,7 @@
 
     rowsPromise
       .then((rows) => {
-        const payoutBudgetAda = getMode() === 'policy'
+        const payoutBudgetAda = ['policy', 'pool'].includes(getMode())
           ? budgetAda
           : validateManualAmountsAgainstBudget(rows, budgetAda);
         const result = buildAirdropRows(rows, payoutBudgetAda, feeAda, minimumAda, mode);
@@ -1252,6 +1337,8 @@
     holderFileInput.value = '';
     holderJsonInput.value = '';
     policyIdInput.value = '';
+    poolIdInput.value = '';
+    minDelegationInput.value = '0';
     if (policyHolderJsonOutput) policyHolderJsonOutput.value = '';
     if (policyAddressesInput) policyAddressesInput.value = '';
     budgetInput.value = '100';
@@ -1355,6 +1442,16 @@
 
     if (policyBudgetUpdateTimer) clearTimeout(policyBudgetUpdateTimer);
     policyBudgetUpdateTimer = setTimeout(() => calculateAirdrop({ scrollToPreview: false }), 250);
+  });
+
+  amountModeInput.addEventListener('change', () => {
+    invalidatePreparedTransaction('Distribution mode changed. Rebuild the transaction to apply it.');
+  });
+
+  [poolIdInput, minDelegationInput].forEach((input) => {
+    input.addEventListener('input', () => {
+      invalidatePreparedTransaction('Pool delegator criteria changed. Recalculate the preview before building a transaction.');
+    });
   });
 
   delegateToPreebInput.addEventListener('change', () => {

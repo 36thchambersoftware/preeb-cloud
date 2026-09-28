@@ -64,6 +64,9 @@
             <button type="button" class="airdrop-mode-switch__button" data-mode="policy" role="tab" aria-selected="false">
               Policy ID / holder list
             </button>
+            <button type="button" class="airdrop-mode-switch__button" data-mode="pool" role="tab" aria-selected="false">
+              Stake pool delegators
+            </button>
           </div>
 
           <div id="airdrop-upload-panel" class="airdrop-panel is-visible">
@@ -85,6 +88,14 @@
             <textarea id="policy-holder-json" readonly placeholder="The valid address-only JSON list will appear here after the policy loads."></textarea>
           </div>
 
+          <div id="airdrop-pool-panel" class="airdrop-panel" hidden>
+            <label class="field-label" for="pool-id-input">Stake pool ID</label>
+            <input id="pool-id-input" type="text" placeholder="pool1..." />
+            <label class="field-label" for="min-delegation-ada">Minimum active stake (ADA)</label>
+            <input id="min-delegation-ada" type="number" min="0" step="1" value="0" />
+            <p class="thank-you-note">Proportional distribution uses each eligible delegator's active stake.</p>
+          </div>
+
           <div class="airdrop-form-grid">
             <div>
               <label class="field-label" for="budget-ada">Airdrop budget (ADA)</label>
@@ -93,7 +104,7 @@
             <div>
               <label class="field-label" for="amount-mode">Distribution mode</label>
               <select id="amount-mode">
-                <option value="weighted" selected>Per-NFT allocation (proportional)</option>
+                <option value="weighted" selected>Proportional allocation</option>
                 <option value="equal">Equal split across valid holders</option>
               </select>
             </div>
@@ -118,7 +129,7 @@
             </div>
           </div>
 
-          <p class="airdrop-calculation-note">
+          <p id="airdrop-calculation-note" class="airdrop-calculation-note">
             Proportional mode divides the requested payout budget by total NFT quantity, then multiplies that per-NFT amount by each wallet's holdings. Thank you is optional and added on top.
           </p>
 
@@ -180,7 +191,7 @@
               <thead>
                 <tr>
                   <th>Recipient</th>
-                  <th>NFTs held</th>
+                  <th id="airdrop-preview-weight-title">NFTs held</th>
                   <th>ADA payout</th>
                   <th>Status</th>
                 </tr>
