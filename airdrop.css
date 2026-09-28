@@ -518,6 +518,104 @@ tbody tr:hover {
   color: var(--color-danger);
 }
 
+.airdrop-activity {
+  background: linear-gradient(180deg, var(--color-bg-mid), var(--color-bg));
+}
+
+.airdrop-activity__heading {
+  align-items: end;
+  display: flex;
+  gap: 1.5rem;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.airdrop-activity__heading .section__title {
+  margin-top: 0.4rem;
+}
+
+.airdrop-activity__status {
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  max-width: 18rem;
+  text-align: right;
+}
+
+.airdrop-activity__stats {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--color-border);
+  border: 1px solid var(--color-border);
+}
+
+.activity-stat {
+  background: rgba(21, 28, 48, 0.96);
+  min-height: 6.8rem;
+  padding: 1rem;
+}
+
+.activity-stat span,
+.airdrop-activity__policies > span {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.activity-stat strong {
+  color: var(--color-cyan);
+  display: block;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.45rem;
+  margin-top: 0.45rem;
+}
+
+.airdrop-activity__policies {
+  border-bottom: 1px solid var(--color-border);
+  padding: 1.15rem 0;
+}
+
+.airdrop-activity__policy-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.airdrop-activity code {
+  background: rgba(60, 200, 200, 0.1);
+  border: 1px solid rgba(60, 200, 200, 0.22);
+  color: var(--color-cyan);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  padding: 0.3rem 0.45rem;
+}
+
+.activity-empty {
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+}
+
+.airdrop-activity__table-wrap {
+  margin-top: 0.75rem;
+}
+
+.airdrop-activity__table {
+  min-width: 700px;
+}
+
+.tx-link {
+  color: var(--color-cyan);
+  font-family: monospace;
+}
+
+.tx-link:hover {
+  color: var(--color-text);
+}
+
 @media (max-width: 860px) {
   .airdrop-hero__inner,
   .airdrop-layout,
@@ -532,5 +630,19 @@ tbody tr:hover {
   .airdrop-actions .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .airdrop-activity__heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .airdrop-activity__status {
+    max-width: none;
+    text-align: left;
+  }
+
+  .airdrop-activity__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

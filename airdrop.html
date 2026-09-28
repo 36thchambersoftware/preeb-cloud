@@ -241,6 +241,43 @@
         </div>
       </div>
     </section>
+
+    <section class="section airdrop-activity" aria-labelledby="airdrop-activity-title">
+      <div class="container">
+        <div class="airdrop-activity__heading">
+          <div>
+            <span class="section__eyebrow">Verified on Cardano</span>
+            <h2 class="section__title" id="airdrop-activity-title">Airdrop activity</h2>
+          </div>
+          <p id="airdrop-activity-status" class="airdrop-activity__status">Loading submitted airdrops...</p>
+        </div>
+
+        <div id="airdrop-activity-stats" class="airdrop-activity__stats" aria-live="polite"></div>
+
+        <div class="airdrop-activity__policies">
+          <span>Policy IDs used</span>
+          <div id="airdrop-activity-policies" class="airdrop-activity__policy-list"></div>
+        </div>
+
+        <div class="table-wrap airdrop-activity__table-wrap">
+          <table class="airdrop-activity__table">
+            <thead>
+              <tr>
+                <th>Transaction</th>
+                <th>ADA distributed</th>
+                <th>Recipients</th>
+                <th>Source</th>
+                <th>Delegation</th>
+                <th>Submitted</th>
+              </tr>
+            </thead>
+            <tbody id="airdrop-activity-body">
+              <tr><td colspan="6" class="empty-state">Loading airdrop activity...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script src="/script.js"></script>

@@ -8,6 +8,7 @@
   const MIN_ADA_OUTPUT_LOVELACE = LOVELACE_PER_ADA;
   const MAX_AIRDROP_METADATA_BYTES = 160;
   const PREEB_AIRDROP_SIGNATURE = 'Airdrop courtesy of PREEB';
+  const PREEB_AIRDROP_METADATA_VERSION = 'v1';
   const MAX_AIRDROP_NOTE_BYTES = MAX_AIRDROP_METADATA_BYTES - new TextEncoder().encode(PREEB_AIRDROP_SIGNATURE).length;
   const METADATA_TEXT_CHUNK_BYTES = 64;
 
@@ -37,11 +38,17 @@
   const executionMessage = document.getElementById('airdrop-execution-message');
   const executionSteps = document.querySelectorAll('.airdrop-step');
   const holderJsonStatus = document.getElementById('holder-json-status');
+  const activityStats = document.getElementById('airdrop-activity-stats');
+  const activityPolicyIds = document.getElementById('airdrop-activity-policies');
+  const activityBody = document.getElementById('airdrop-activity-body');
+  const activityStatus = document.getElementById('airdrop-activity-status');
 
   let latestPreviewResult = null;
   let connectedWalletApi = null;
   let latestPreparedBatch = null;
   const KOIOS_POLICY_CACHE_KEY = 'preeb-koios-policy-cache';
+  const SIGNED_AIRDROP_QUEUE_KEY = 'preeb-signed-airdrop-events';
+  const MAX_QUEUED_SIGNED_AIRDROPS = 25;
   const koiosPolicyCache = new Map();
 
   const summaryRecipients = document.getElementById('summary-recipients');
@@ -221,7 +228,7 @@
     return chunks;
   }
 
-  function buildAirdropMetadata(csl) {
+  function buildAirdropMetadata(csl, trackingData = null) {
     const userNote = truncateUtf8Text(airdropNoteInput.value, MAX_AIRDROP_NOTE_BYTES);
     const messages = [
       ...(userNote ? splitMetadataText(userNote) : []),
@@ -243,6 +250,25 @@
       csl.TransactionMetadatum.new_map(messageMap)
     );
 
+    if (trackingData) {
+      const trackingMap = csl.MetadataMap.new();
+      const addTrackingField = (name, value) => {
+        trackingMap.insert(
+          csl.TransactionMetadatum.new_text(name),
+          csl.TransactionMetadatum.new_text(String(value))
+        );
+      };
+      addTrackingField('preeb_airdrop', PREEB_AIRDROP_METADATA_VERSION);
+      addTrackingField('recipient_count', trackingData.recipientCount);
+      addTrackingField('payout_lovelace', trackingData.payoutLovelace);
+      addTrackingField('mode', trackingData.mode);
+      if (trackingData.policyId) addTrackingField('policy_id', trackingData.policyId);
+      metadata.insert(
+        csl.BigNum.from_str('675'),
+        csl.TransactionMetadatum.new_map(trackingMap)
+      );
+    }
+
     const auxiliaryData = csl.AuxiliaryData.new();
     auxiliaryData.set_metadata(metadata);
     return auxiliaryData;
@@ -251,6 +277,129 @@
   function setExecutionMessage(message, isError = false) {
     executionMessage.textContent = message;
     executionMessage.classList.toggle('is-error', isError);
+  }
+
+  function readQueuedSignedAirdrops() {
+    try {
+      const queued = JSON.parse(window.localStorage?.getItem(SIGNED_AIRDROP_QUEUE_KEY) || '[]');
+      return Array.isArray(queued) ? queued : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function writeQueuedSignedAirdrops(events) {
+    try {
+      window.localStorage?.setItem(
+        SIGNED_AIRDROP_QUEUE_KEY,
+        JSON.stringify(events.slice(-MAX_QUEUED_SIGNED_AIRDROPS))
+      );
+    } catch {
+      // Tracking is best-effort and must never interfere with a wallet transaction.
+    }
+  }
+
+  function queueSignedAirdrop(event) {
+    const queued = readQueuedSignedAirdrops();
+    const existingIndex = queued.findIndex((item) => item?.txHash === event.txHash);
+    if (existingIndex >= 0) queued[existingIndex] = event;
+    else queued.push(event);
+    writeQueuedSignedAirdrops(queued);
+  }
+
+  async function sendSignedAirdropEvent(event) {
+    const response = await fetch('/api/airdrop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+    });
+    if (!response.ok) throw new Error(`Airdrop tracking returned ${response.status}.`);
+  }
+
+  async function flushQueuedSignedAirdrops() {
+    const queued = readQueuedSignedAirdrops();
+    if (queued.length === 0) return;
+
+    const remaining = [];
+    for (const event of queued) {
+      try {
+        await sendSignedAirdropEvent(event);
+      } catch {
+        remaining.push(event);
+      }
+    }
+    writeQueuedSignedAirdrops(remaining);
+  }
+
+  async function trackSubmittedAirdrop(txHash) {
+    queueSignedAirdrop({ txHash });
+    try {
+      await flushQueuedSignedAirdrops();
+    } catch {}
+  }
+
+  function formatActivityAda(lovelace) {
+    try {
+      return formatAda(Number(BigInt(String(lovelace || '0')) / LOVELACE_PER_ADA));
+    } catch {
+      return '0.00 ₳';
+    }
+  }
+
+  function formatActivityDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? 'Unknown date'
+      : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function renderAirdropActivity(data) {
+    if (!activityStats || !activityPolicyIds || !activityBody || !activityStatus) return;
+
+    const stats = data?.stats || {};
+    const policyIds = Array.isArray(stats.policyIds) ? stats.policyIds : [];
+    const airdrops = Array.isArray(data?.airdrops) ? data.airdrops : [];
+    activityStats.innerHTML = [
+      ['Total airdrops', Number(stats.totalAirdrops || 0).toLocaleString()],
+      ['ADA distributed', formatActivityAda(stats.totalLovelace)],
+      ['Recipients reached', Number(stats.totalRecipients || 0).toLocaleString()],
+      ['Policy IDs used', policyIds.length.toLocaleString()],
+      ['Network fees', formatActivityAda(stats.totalFeeLovelace)],
+      ['PREEB delegations', Number(stats.delegatedAirdrops || 0).toLocaleString()],
+    ].map(([label, value]) => `<div class="activity-stat"><span>${label}</span><strong>${value}</strong></div>`).join('');
+
+    activityPolicyIds.innerHTML = policyIds.length > 0
+      ? policyIds.map((policyId) => `<code title="${escapeHtml(policyId)}">${escapeHtml(policyId)}</code>`).join('')
+      : '<span class="activity-empty">No policy IDs recorded yet.</span>';
+
+    activityBody.innerHTML = airdrops.length > 0
+      ? airdrops.map((airdrop) => `
+        <tr>
+          <td><a class="tx-link" href="https://cardanoscan.io/transaction/${encodeURIComponent(airdrop.txHash)}" target="_blank" rel="noreferrer" title="View ${escapeHtml(airdrop.txHash)} on Cardanoscan">${escapeHtml(formatAddress(airdrop.txHash))}</a></td>
+          <td>${formatActivityAda(airdrop.paidLovelace)}</td>
+          <td>${Number(airdrop.recipientCount || 0).toLocaleString()}</td>
+          <td>${airdrop.policyId ? `<code title="${escapeHtml(airdrop.policyId)}">${escapeHtml(formatAddress(airdrop.policyId))}</code>` : 'Upload list'}</td>
+          <td>${airdrop.delegatedToPreeb ? 'PREEB' : 'None'}</td>
+          <td>${escapeHtml(formatActivityDate(airdrop.submittedAt))}</td>
+        </tr>
+      `).join('')
+      : '<tr><td colspan="6" class="empty-state">No submitted airdrops have been recorded yet.</td></tr>';
+
+    const awaiting = Number(stats.signedAwaitingSubmission || 0);
+    activityStatus.textContent = awaiting > 0
+      ? `${awaiting} signed transaction${awaiting === 1 ? '' : 's'} awaiting submission.`
+      : 'Only wallet-submitted transactions are listed below.';
+  }
+
+  async function loadAirdropActivity() {
+    if (!activityStatus) return;
+    try {
+      const response = await fetch('/api/airdrop', { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`Airdrop activity returned ${response.status}.`);
+      renderAirdropActivity(await response.json());
+    } catch {
+      activityStatus.textContent = 'Airdrop activity is temporarily unavailable.';
+    }
   }
 
   function setHolderJsonValidationState(isValid, message = '') {
@@ -502,9 +651,9 @@
       witnessSet,
       latestPreparedBatch.tx.auxiliary_data()
     );
-
     setExecutionMessage('Submitting transaction...');
     const txHash = await api.submitTx(bytesToHex(signedTx.to_bytes()));
+    await trackSubmittedAirdrop(txHash);
     updateExecutionSteps('complete');
     setExecutionMessage(`Transaction submitted successfully: ${txHash}`);
     signBtn.disabled = true;
@@ -554,7 +703,20 @@
       const firstBatch = batches[0];
       const txBuilder = csl.TransactionBuilder.new(config);
       if (delegation.certificates) txBuilder.set_certs(delegation.certificates);
-      const auxiliaryData = buildAirdropMetadata(csl);
+      const normalizedPolicyId = String(policyIdInput?.value || '').trim().toLowerCase().replace(/^0x/, '');
+      const policyId = getMode() === 'policy' && /^[0-9a-f]{56,112}$/.test(normalizedPolicyId)
+        ? normalizedPolicyId.slice(0, 56)
+        : null;
+      const trackedPayoutLovelace = validRows.reduce(
+        (total, row) => total + BigInt(Math.floor(row.payoutAda * Number(LOVELACE_PER_ADA))),
+        0n
+      );
+      const auxiliaryData = buildAirdropMetadata(csl, {
+        recipientCount: latestPreviewResult.recipientCount,
+        payoutLovelace: trackedPayoutLovelace.toString(),
+        mode: getMode(),
+        policyId,
+      });
       txBuilder.set_auxiliary_data(auxiliaryData);
       const utxos = csl.TransactionUnspentOutputs.new();
       for (const utxoHex of utxoHexes) {
@@ -1247,4 +1409,6 @@
   setMode('upload');
   updateSummary({ recipientCount: 0, paidAda: 0, feeAda: 0, skipped: 0, remainderAda: 0 });
   renderPreview([]);
+  loadAirdropActivity();
+  void flushQueuedSignedAirdrops();
 })();
