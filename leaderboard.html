@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PREEB Leaderboard — Delegator Rankings</title>
+  <meta name="description" content="PREEB Pool delegator leaderboard: bear roles, stake rankings, and loyalty rankings by epochs delegated." />
+  <link rel="canonical" href="https://preeb.cloud/leaderboard" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/leaderboard.css" />
+</head>
+<body>
+  <nav class="nav" id="top">
+    <div class="nav__inner container">
+      <a href="/" class="nav__logo">
+        <span class="logo-ticker">PREEB</span>
+        <span class="logo-sub">A Cardano Stake Pool</span>
+      </a>
+      <ul class="nav__links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/airdrop">Airdrop</a></li>
+        <li><a href="/leaderboard" aria-current="page">Leaderboard</a></li>
+        <li><a href="/wall">Guest Wall</a></li>
+      </ul>
+      <button class="nav__hamburger" aria-label="Toggle menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <main>
+    <section class="board-hero">
+      <div class="container board-hero__inner">
+        <div>
+          <span class="section__eyebrow">PREEB Community</span>
+          <h1 class="section__title board-hero__title">Delegator Leaderboard</h1>
+          <p class="section__subtitle board-hero__subtitle">
+            Every delegator earns a bear. Ranked by stake or by loyalty — pick your board.
+            Handles appear for delegators who sign the <a href="/wall">Guest Wall</a>.
+          </p>
+        </div>
+        <div class="board-hero__meta" id="board-meta" hidden>
+          <div class="board-hero__chip"><span id="board-delegator-count">—</span> Delegators</div>
+          <div class="board-hero__chip"><span id="board-total-stake">—</span> Total Stake</div>
+          <div class="board-hero__chip">Epoch <span id="board-epoch">—</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--mid">
+      <div class="container">
+        <div class="board-roles" id="board-roles-summary" hidden></div>
+
+        <div class="board-toolbar">
+          <div class="board-view-switch" role="tablist" aria-label="Leaderboard view">
+            <button type="button" class="board-view-switch__button is-active" data-view="stake" role="tab" aria-selected="true">
+              🏆 By Stake
+            </button>
+            <button type="button" class="board-view-switch__button" data-view="loyalty" role="tab" aria-selected="false">
+              ⏳ By Loyalty
+            </button>
+          </div>
+          <p class="board-updated" id="board-updated"></p>
+        </div>
+
+        <div class="board-loading" id="board-loading">
+          <div class="wallet-sync__spinner" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p>Summoning the bears...</p>
+        </div>
+
+        <div class="board-error" id="board-error" hidden>
+          <p>Could not load the leaderboard right now. Please refresh in a moment.</p>
+        </div>
+
+        <div class="board-table-wrap" id="board-table-wrap" hidden>
+          <table class="board-table">
+            <thead>
+              <tr>
+                <th class="board-table__rank">#</th>
+                <th>Delegator</th>
+                <th>Role</th>
+                <th class="board-table__num" id="board-epochs-header">Epochs 🏅</th>
+                <th class="board-table__num" id="board-stake-header">Stake</th>
+              </tr>
+            </thead>
+            <tbody id="board-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <span class="logo-ticker">PREEB</span>
+        <span class="footer__tagline">Decentralize Cardano. Earn Rewards.</span>
+      </div>
+      <nav class="footer__links" aria-label="Footer navigation">
+        <a href="https://discord.gg/nN5xb7zH7d" target="_blank" rel="noopener">Discord</a>
+        <a href="https://x.com/PREEB_Pool" target="_blank" rel="noopener">@PREEB_Pool</a>
+      </nav>
+    </div>
+    <div class="footer__bottom">
+      <div class="container">
+        <p class="footer__copyright">© <span id="year"></span> PREEB Pool. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/leaderboard.js"></script>
+  <script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>

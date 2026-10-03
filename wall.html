@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PREEB Guest Wall — Leave Your Mark</title>
+  <meta name="description" content="Sign the PREEB Pool guest wall with your Cardano wallet. Verified on-chain identity, no transaction or fees required." />
+  <link rel="canonical" href="https://preeb.cloud/wall" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/wall.css" />
+</head>
+<body>
+  <nav class="nav" id="top">
+    <div class="nav__inner container">
+      <a href="/" class="nav__logo">
+        <span class="logo-ticker">PREEB</span>
+        <span class="logo-sub">A Cardano Stake Pool</span>
+      </a>
+      <ul class="nav__links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/airdrop">Airdrop</a></li>
+        <li><a href="/leaderboard">Leaderboard</a></li>
+        <li><a href="/wall" aria-current="page">Guest Wall</a></li>
+      </ul>
+      <button class="nav__hamburger" aria-label="Toggle menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <main>
+    <section class="wall-hero">
+      <div class="container">
+        <span class="section__eyebrow">PREEB Community</span>
+        <h1 class="section__title wall-hero__title">Guest Wall</h1>
+        <p class="section__subtitle wall-hero__subtitle">
+          Leave your mark on the den. Sign a message with your Cardano wallet —
+          cryptographically verified, no transaction and no fees. If you have an
+          ADA Handle, it shows up automatically.
+        </p>
+      </div>
+    </section>
+
+    <section class="section section--mid">
+      <div class="container wall-layout">
+
+        <div class="wall-sign-card" id="wall-sign-card">
+          <div class="wall-sign-card__header">
+            <h2>Sign the Wall</h2>
+            <span class="wall-sign-card__pill">Free · signature only</span>
+          </div>
+
+          <label class="field-label" for="wall-message">Your message</label>
+          <textarea id="wall-message" maxlength="280" rows="3" placeholder="Say hi to the bears... 🐻"></textarea>
+          <div class="wall-sign-card__char-row">
+            <span id="wall-char-count">0 / 280</span>
+          </div>
+
+          <div class="wall-sign-card__wallets" id="wall-wallet-choices"></div>
+          <div class="wall-sign-card__status" id="wall-sign-status" hidden></div>
+          <p class="wall-sign-card__note">
+            Re-signing with the same wallet updates your message. Your full address
+            is never shown publicly.
+          </p>
+        </div>
+
+        <div class="wall-entries">
+          <div class="wall-entries__header">
+            <h2>The Wall</h2>
+            <span class="wall-entries__count" id="wall-count">—</span>
+          </div>
+
+          <div class="wall-loading" id="wall-loading">
+            <div class="wallet-sync__spinner" aria-hidden="true"><span></span><span></span><span></span></div>
+            <p>Reading the wall...</p>
+          </div>
+
+          <div class="wall-error" id="wall-error" hidden>
+            <p>Could not load the guest wall right now. Please refresh in a moment.</p>
+          </div>
+
+          <div class="wall-empty" id="wall-empty" hidden>
+            <p>No signatures yet — be the first bear on the wall. 🐾</p>
+          </div>
+
+          <ul class="wall-list" id="wall-list"></ul>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <span class="logo-ticker">PREEB</span>
+        <span class="footer__tagline">Decentralize Cardano. Earn Rewards.</span>
+      </div>
+      <nav class="footer__links" aria-label="Footer navigation">
+        <a href="https://discord.gg/nN5xb7zH7d" target="_blank" rel="noopener">Discord</a>
+        <a href="https://x.com/PREEB_Pool" target="_blank" rel="noopener">@PREEB_Pool</a>
+      </nav>
+    </div>
+    <div class="footer__bottom">
+      <div class="container">
+        <p class="footer__copyright">© <span id="year"></span> PREEB Pool. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/wall.js"></script>
+  <script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>

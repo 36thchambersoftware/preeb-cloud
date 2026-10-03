@@ -1,0 +1,307 @@
+/* ================================================================
+   PREEB Leaderboard — Page Styles
+   Scoped additions only; relies on variables/utilities from styles.css.
+   ================================================================ */
+
+.board-hero {
+  padding: var(--space-3xl) 0 var(--space-2xl);
+}
+
+.board-hero__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-xl);
+}
+
+.board-hero__subtitle a {
+  color: var(--color-cyan);
+}
+
+.board-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.board-hero__chip {
+  padding: 0.5em 1em;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-heading);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.board-hero__chip span {
+  color: var(--color-cyan);
+  font-weight: 600;
+}
+
+/* ─── Role summary chips ─── */
+.board-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xl);
+}
+
+.board-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 1em 0.4em 0.4em;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+}
+
+.board-role-chip img {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  object-fit: contain;
+}
+
+.board-role-chip__name {
+  font-family: var(--font-heading);
+  font-size: 0.85rem;
+}
+
+.board-role-chip__count {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  color: var(--color-cyan);
+}
+
+/* ─── View switch ─── */
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.board-view-switch {
+  display: inline-flex;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 4px;
+  gap: 4px;
+}
+
+.board-view-switch__button {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-heading);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.5em 1.2em;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.board-view-switch__button.is-active {
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+}
+
+.board-updated {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+/* ─── Table ─── */
+.board-loading,
+.board-error {
+  text-align: center;
+  padding: var(--space-3xl) var(--space-lg);
+  color: var(--color-text-muted);
+}
+
+.board-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.board-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+}
+
+.board-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.board-table th {
+  text-align: left;
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.board-table td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.board-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.board-table tbody tr:hover {
+  background: rgba(60, 200, 200, 0.04);
+}
+
+.board-table__num {
+  text-align: right;
+}
+
+.board-table th.board-table__num,
+.board-table td.board-table__num {
+  text-align: right;
+}
+
+.board-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2em;
+  height: 2em;
+  border-radius: var(--radius-full);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.board-rank--gold {
+  background: rgba(255, 199, 0, 0.15);
+  color: #ffc700;
+}
+
+.board-rank--silver {
+  background: rgba(192, 192, 192, 0.15);
+  color: #c8ccd4;
+}
+
+.board-rank--bronze {
+  background: rgba(205, 127, 50, 0.18);
+  color: #d08a4a;
+}
+
+.board-who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.board-who__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  object-fit: contain;
+  background: var(--color-bg-card-2);
+  border: 1px solid var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.board-who__names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.board-who__name {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board-who__sub {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.board-role-pill {
+  display: inline-block;
+  padding: 0.25em 0.9em;
+  border-radius: var(--radius-full);
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+  font-family: var(--font-heading);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.board-role-pill--none {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.board-epochs {
+  display: inline-block;
+  padding: 0.25em 0.9em;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.board-epochs--new {
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 720px) {
+  .board-table thead {
+    display: none;
+  }
+
+  .board-table,
+  .board-table tbody,
+  .board-table tr,
+  .board-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .board-table td {
+    border-bottom: 0;
+    padding: var(--space-xs) var(--space-md);
+  }
+
+  .board-table tr {
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .board-table td.board-table__num {
+    text-align: left;
+  }
+}

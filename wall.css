@@ -1,0 +1,243 @@
+/* ================================================================
+   PREEB Guest Wall — Page Styles
+   Scoped additions only; relies on variables/utilities from styles.css.
+   ================================================================ */
+
+.wall-hero {
+  padding: var(--space-3xl) 0 var(--space-2xl);
+}
+
+.wall-hero__title {
+  margin-bottom: var(--space-sm);
+}
+
+.wall-hero__subtitle {
+  max-width: 640px;
+}
+
+.wall-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: var(--space-2xl);
+  align-items: start;
+}
+
+/* ─── Sign card ─── */
+.wall-sign-card {
+  background: linear-gradient(145deg, var(--color-bg-card), var(--color-bg-card-2));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  position: sticky;
+  top: calc(var(--nav-height, 72px) + var(--space-lg));
+}
+
+.wall-sign-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.wall-sign-card__header h2 {
+  font-family: var(--font-heading);
+  font-size: 1.2rem;
+}
+
+.wall-sign-card__pill {
+  font-size: 0.72rem;
+  font-family: var(--font-heading);
+  padding: 0.25em 0.8em;
+  border-radius: var(--radius-full);
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+  white-space: nowrap;
+}
+
+.wall-sign-card textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: var(--space-md);
+}
+
+.wall-sign-card textarea:focus {
+  outline: none;
+  border-color: var(--color-cyan);
+}
+
+.wall-sign-card__char-row {
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.wall-sign-card__wallets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.wall-sign-card__wallets .btn {
+  width: 100%;
+}
+
+.wall-sign-card__status {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  background: rgba(60, 200, 200, 0.08);
+  border: 1px solid rgba(60, 200, 200, 0.28);
+  font-size: 0.9rem;
+}
+
+.wall-sign-card__status.is-error {
+  background: rgba(255, 120, 120, 0.1);
+  border-color: rgba(255, 120, 120, 0.45);
+}
+
+.wall-sign-card__note {
+  margin-top: var(--space-md);
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+/* ─── Entries ─── */
+.wall-entries__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.wall-entries__header h2 {
+  font-family: var(--font-heading);
+  font-size: 1.3rem;
+}
+
+.wall-entries__count {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.wall-loading,
+.wall-error,
+.wall-empty {
+  text-align: center;
+  padding: var(--space-3xl) var(--space-lg);
+  color: var(--color-text-muted);
+}
+
+.wall-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.wall-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-md);
+}
+
+.wall-entry {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.wall-entry__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.wall-entry__avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  object-fit: contain;
+  background: var(--color-bg-card-2);
+  border: 1px solid var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.wall-entry__names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.wall-entry__name {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wall-entry__date {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.wall-entry__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wall-entry__badge {
+  font-size: 0.72rem;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  padding: 0.2em 0.7em;
+  border-radius: var(--radius-full);
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+}
+
+.wall-entry__badge--visitor {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.wall-entry__message {
+  color: var(--color-text);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .wall-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wall-sign-card {
+    position: static;
+  }
+}

@@ -333,6 +333,51 @@
     return best;
   }
 
+  // ─── Leaderboard rank ─────────────────────────────────────────
+
+  function compareLovelaceDesc(left, right) {
+    const a = BigInt(left.activeStake || 0);
+    const b = BigInt(right.activeStake || 0);
+    return a === b ? 0 : b > a ? 1 : -1;
+  }
+
+  function applyLeaderboardRank(ranks) {
+    const rankEl = document.getElementById('profile-rank');
+    if (rankEl) {
+      rankEl.textContent = ranks
+        ? `#${ranks.stake} by stake · #${ranks.loyalty} by loyalty`
+        : 'Not ranked yet';
+    }
+    if (lastProfileState && ranks) {
+      lastProfileState.rankText = `#${ranks.stake} by stake, #${ranks.loyalty} by loyalty`;
+    }
+  }
+
+  async function attachLeaderboardRank(wallets) {
+    try {
+      const resp = await fetchJsonWithTimeout('/api/leaderboard', { headers: { Accept: 'application/json' } });
+      const delegators = Array.isArray(resp?.delegators) ? resp.delegators : [];
+      if (delegators.length === 0) {
+        applyLeaderboardRank(null);
+        return;
+      }
+
+      const walletSet = new Set(wallets);
+      const byStake = [...delegators].sort(compareLovelaceDesc);
+      const byLoyalty = [...delegators].sort(
+        (a, b) => (b.epochsDelegated - a.epochsDelegated) || compareLovelaceDesc(a, b)
+      );
+      const stakeRank = byStake.findIndex((d) => walletSet.has(d.stake)) + 1;
+      const loyaltyRank = byLoyalty.findIndex((d) => walletSet.has(d.stake)) + 1;
+
+      applyLeaderboardRank(stakeRank > 0 && loyaltyRank > 0 ? { stake: stakeRank, loyalty: loyaltyRank } : null);
+    } catch (err) {
+      console.warn('[PREEB] Could not load leaderboard rank:', getErrorMessage(err));
+      const rankEl = document.getElementById('profile-rank');
+      if (rankEl) rankEl.textContent = '—';
+    }
+  }
+
   function renderRolesList(totalAdaDelegated) {
     const list = document.getElementById('profile-roles-list');
     if (!list) return;
@@ -480,6 +525,8 @@
       epochsDelegated,
       role: getHighestRole(totalAdaDelegated),
     });
+
+    attachLeaderboardRank(wallets);
 
     if (loadingEl) loadingEl.hidden = true;
     if (contentEl) contentEl.hidden = false;
@@ -691,7 +738,8 @@
 
   function onShareClick() {
     if (!lastProfileState) return;
-    const text = `I'm ${lastProfileState.roleName} with PREEB Pool! 🐻⚡ #Cardano #PREEBPool`;
+    const rankPart = lastProfileState.rankText ? ` Ranked ${lastProfileState.rankText} on the leaderboard.` : '';
+    const text = `I'm ${lastProfileState.roleName} with PREEB Pool!${rankPart} 🐻⚡ #Cardano #PREEBPool`;
     const url = window.location.href;
     window.open(
       `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,

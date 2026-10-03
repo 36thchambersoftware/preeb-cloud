@@ -2,6 +2,8 @@
   "rewrites": [
     { "source": "/profile", "destination": "/profile.html" },
     { "source": "/profile/:stake", "destination": "/profile.html" },
-    { "source": "/airdrop", "destination": "/airdrop.html" }
+    { "source": "/airdrop", "destination": "/airdrop.html" },
+    { "source": "/leaderboard", "destination": "/leaderboard.html" },
+    { "source": "/wall", "destination": "/wall.html" }
   ]
 }
