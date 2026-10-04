@@ -216,12 +216,12 @@ async function getPublicAirdropData(db) {
 }
 
 async function saveVerifiedAirdrop(collection, event) {
-  const { status, submittedAt, ...signedEvent } = event;
+  // $set (not $setOnInsert) so promoting an existing pending record also stores its details.
   await collection.updateOne(
     { txHash: event.txHash },
     {
-      $setOnInsert: { ...signedEvent, createdAt: new Date() },
-      $set: { status, submittedAt, updatedAt: new Date() },
+      $setOnInsert: { createdAt: new Date() },
+      $set: { ...event, updatedAt: new Date() },
       $unset: { expiresAt: '' },
     },
     { upsert: true }
@@ -246,7 +246,11 @@ async function savePendingAirdrop(collection, txHash) {
 
 async function promotePendingAirdrops(db) {
   const collection = db.collection(AIRDROPS_COLLECTION);
-  const pending = await collection.find({ status: 'pending' }, { projection: { txHash: 1 } })
+  // Also repairs submitted records saved without details by the earlier promotion bug.
+  const pending = await collection.find(
+    { $or: [{ status: 'pending' }, { status: 'submitted', paidLovelace: { $exists: false } }] },
+    { projection: { txHash: 1 } }
+  )
     .limit(PENDING_AIRDROP_RECHECK_LIMIT)
     .toArray();
 
