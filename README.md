@@ -35,3 +35,13 @@ Use Vercel dev so the API route is available locally:
 
 - `script.js` already prefers `/api/koios` first.
 - Optional override: set `window.PREEB_KOIOS_BASE` before loading `script.js`.
+
+## Airdrop transaction funding
+
+The airdrop builder adds recipient and PREEB outputs before selecting wallet
+UTxOs. The funding check includes the actual outputs (including any budget
+remainder and thank-you payment) and any stake registration deposit. Transaction
+fees and minimum ADA for token change are checked when balancing the transaction;
+the displayed wallet balance alone does not guarantee it can be balanced.
+
+Run the funding regression tests with `node --test tests/airdrop.test.js`.

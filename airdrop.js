@@ -500,7 +500,12 @@
     if (/insufficient|not enough|balance too low|utxo.*insufficient|lovelace.*insufficient|funds.*low|not enough ada/i.test(lower)) {
       const required = context.requiredLovelace != null ? formatAda(Number(context.requiredLovelace) / 1_000_000) : 'the required ADA';
       const available = context.availableLovelace != null ? formatAda(Number(context.availableLovelace) / 1_000_000) : 'the wallet balance';
-      return `Not enough funds in the connected wallet to finish this airdrop. Required ${required}, available ${available}. The wallet also needs to cover the transaction fee and any optional delegation deposit.`;
+      const belowRequired = context.requiredLovelace != null && context.availableLovelace != null
+        && context.availableLovelace < context.requiredLovelace;
+      if (belowRequired) {
+        return `Not enough funds in the connected wallet to finish this airdrop. Required ${required} before the transaction fee (including any delegation deposit), available ${available}.`;
+      }
+      return `Unable to balance the airdrop transaction. Required ${required} before the transaction fee (including any delegation deposit), available ${available}. Selected UTxOs must also cover the fee and minimum ADA for any token change. Wallet/library details: ${readableText}`;
     }
 
     if (/account.*changed|accountchange|stale account|wallet account changed/i.test(lower)) {
@@ -684,8 +689,8 @@
     }
 
     let csl = null;
-    let availableLovelace = 0n;
-    let requiredLovelace = 0n;
+    let availableLovelace = null;
+    let requiredLovelace = null;
 
     try {
       csl = await loadCardanoSerializationLib();
@@ -701,13 +706,7 @@
       const protocol = Array.isArray(protocolRaw) ? protocolRaw[0] : protocolRaw;
       const { config, maxTxSize, keyDeposit } = buildTransactionConfig(csl, protocol);
       const delegation = await buildPreebDelegationCertificates(csl, api, keyDeposit);
-      const payoutLovelace = BigInt(Math.ceil(latestPreviewResult.paidAda * 1_000_000));
       const thankYouLovelace = BigInt(Math.floor(parseThankYou() * Number(LOVELACE_PER_ADA)));
-      requiredLovelace = payoutLovelace + thankYouLovelace + delegation.registrationDeposit;
-
-      if (availableLovelace < requiredLovelace) {
-        throw new Error(`Insufficient wallet funds. Required ${formatAda(Number(requiredLovelace) / 1_000_000)}, available ${formatAda(Number(availableLovelace) / 1_000_000)}.`);
-      }
       const validRows = latestPreviewResult.rows.filter((row) => row.status === 'Valid');
       const maxRecipientsPerBatch = getSafeSingleBatchRecipientLimit(protocol);
 
@@ -748,21 +747,6 @@
         utxos.add(utxo);
       }
 
-      if (txBuilder.add_inputs_from && csl.CoinSelectionStrategyCIP2) {
-        const strategy =
-          csl.CoinSelectionStrategyCIP2.LargestFirstMultiAsset ||
-          csl.CoinSelectionStrategyCIP2.LargestFirst ||
-          0;
-        txBuilder.add_inputs_from(utxos, strategy);
-      } else if (txBuilder.add_regular_input) {
-        for (let index = 0; index < utxos.len(); index += 1) {
-          const utxo = utxos.get(index);
-          txBuilder.add_regular_input(utxo.output().address(), utxo.input(), utxo.output().amount());
-        }
-      } else {
-        throw new Error('Loaded Cardano serialization library has no supported UTxO input-selection method.');
-      }
-
       let firstBatchPayout = 0n;
       for (const row of firstBatch) {
         const payout = BigInt(Math.floor(row.payoutAda * Number(LOVELACE_PER_ADA)));
@@ -777,6 +761,28 @@
         : 0n;
       const preebOutputLovelace = thankYouLovelace + remainderLovelace;
       addAdaOutput(csl, txBuilder, REMAINDER_WALLET, preebOutputLovelace);
+
+      requiredLovelace = firstBatchPayout
+        + (preebOutputLovelace >= MIN_ADA_OUTPUT_LOVELACE ? preebOutputLovelace : 0n)
+        + delegation.registrationDeposit;
+      if (availableLovelace < requiredLovelace) {
+        throw new Error('Insufficient wallet funds for the airdrop outputs and delegation deposit.');
+      }
+
+      if (txBuilder.add_inputs_from && csl.CoinSelectionStrategyCIP2) {
+        const strategy =
+          csl.CoinSelectionStrategyCIP2.LargestFirstMultiAsset ??
+          csl.CoinSelectionStrategyCIP2.LargestFirst ??
+          0;
+        txBuilder.add_inputs_from(utxos, strategy);
+      } else if (txBuilder.add_regular_input) {
+        for (let index = 0; index < utxos.len(); index += 1) {
+          const utxo = utxos.get(index);
+          txBuilder.add_regular_input(utxo.output().address(), utxo.input(), utxo.output().amount());
+        }
+      } else {
+        throw new Error('Loaded Cardano serialization library has no supported UTxO input-selection method.');
+      }
 
       const changeAddressHex = await api.getChangeAddress();
       txBuilder.add_change_if_needed(csl.Address.from_bytes(hexToBytes(changeAddressHex)));
@@ -808,8 +814,8 @@
       updateExecutionSteps('sign');
     } catch (error) {
       const friendlyMessage = formatTransactionPreparationError(error, {
-        availableLovelace: availableLovelace || null,
-        requiredLovelace: requiredLovelace || null,
+        availableLovelace,
+        requiredLovelace,
       });
       throw new Error(friendlyMessage);
     }
