@@ -1497,16 +1497,6 @@
     }
   });
 
-  if (document.querySelector('.nav__hamburger')) {
-    const nav = document.querySelector('.nav');
-    const hamburger = document.querySelector('.nav__hamburger');
-
-    hamburger.addEventListener('click', () => {
-      const open = nav.classList.toggle('nav--open');
-      hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
-  }
-
   readKoiosPolicyCache();
   amountModeInput.value = 'weighted';
   setMode('upload');

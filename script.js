@@ -70,25 +70,6 @@
   const yearEl = document.getElementById('year');
   if (yearEl) yearEl.textContent = new Date().getFullYear();
 
-  // ─── Nav hamburger ────────────────────────────────────────────
-  const nav       = document.querySelector('.nav');
-  const hamburger = document.querySelector('.nav__hamburger');
-
-  if (hamburger && nav) {
-    hamburger.addEventListener('click', () => {
-      const open = nav.classList.toggle('nav--open');
-      hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
-
-    // Close when a link is clicked
-    nav.querySelectorAll('.nav__links a').forEach(link => {
-      link.addEventListener('click', () => {
-        nav.classList.remove('nav--open');
-        hamburger.setAttribute('aria-expanded', 'false');
-      });
-    });
-  }
-
   // ─── Helpers ──────────────────────────────────────────────────
 
   /**
@@ -1944,71 +1925,6 @@
     }
   }
 
-  function initNavProfileButton() {
-    const btn = document.getElementById('nav-profile-btn');
-    const menu = document.getElementById('nav-profile-menu');
-    if (!btn || !menu) return;
-
-    function setMenuStatus(message) {
-      menu.innerHTML = `<div class="nav-profile-menu__status">${message}</div>`;
-      menu.hidden = false;
-    }
-
-    async function connectAndGoToProfile(walletConfig) {
-      setMenuStatus(`Connecting to ${walletConfig.label}...`);
-      try {
-        const provider = walletConfig.provider || window.cardano?.[walletConfig.key];
-        if (!provider) throw new Error(`${walletConfig.label} is not available in this browser`);
-
-        const api = await provider.enable();
-        const rewardAddresses = await api.getRewardAddresses();
-        if (!Array.isArray(rewardAddresses) || rewardAddresses.length === 0) {
-          throw new Error('Connected wallet did not return a reward address');
-        }
-
-        const stakeAddress = await getStakeAddressFromRewardHex(rewardAddresses[0]);
-        try {
-          window.sessionStorage.setItem('preeb-last-wallet-key', walletConfig.key);
-        } catch {
-          // Ignore storage failures (private browsing, quota, etc.).
-        }
-        window.location.href = `/profile/${encodeURIComponent(stakeAddress)}`;
-      } catch (err) {
-        setMenuStatus(getErrorMessage(err));
-      }
-    }
-
-    btn.addEventListener('click', () => {
-      if (!menu.hidden) {
-        menu.hidden = true;
-        return;
-      }
-
-      const available = getAvailableWallets();
-      if (available.length === 0) {
-        setMenuStatus('No supported wallet extension detected. Install Eternl, Vespr, Typhon, or Lace.');
-        return;
-      }
-
-      menu.innerHTML = '';
-      available.forEach((walletConfig) => {
-        const optionBtn = document.createElement('button');
-        optionBtn.type = 'button';
-        optionBtn.className = 'btn btn--outline btn--sm';
-        optionBtn.textContent = `Connect ${walletConfig.label}`;
-        optionBtn.addEventListener('click', () => connectAndGoToProfile(walletConfig));
-        menu.appendChild(optionBtn);
-      });
-      menu.hidden = false;
-    });
-
-    document.addEventListener('click', (event) => {
-      if (!menu.hidden && !menu.contains(event.target) && event.target !== btn) {
-        menu.hidden = true;
-      }
-    });
-  }
-
   function initWalletUi() {
     const buttonsWrap = document.getElementById('wallet-buttons');
     const delegateBtn = document.getElementById('wallet-delegate-btn');
@@ -2115,7 +2031,6 @@
   }
 
   initWalletUi();
-  initNavProfileButton();
 
   window.PreebWallet = {
     getAvailableWallets,

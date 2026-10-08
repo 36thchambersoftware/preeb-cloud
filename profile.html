@@ -17,26 +17,16 @@
 </head>
 <body>
 
-  <!-- ─────────── NAV ─────────── -->
-  <nav class="nav" id="top">
-    <div class="nav__inner container">
-      <a href="/#top" class="nav__logo">
-        <span class="logo-ticker">PREEB</span>
-        <span class="logo-sub">A Cardano Stake Pool</span>
-      </a>
-      <ul class="nav__links">
-        <li><a href="/#wallet" class="btn btn--outline btn--sm">Back to Main Site</a></li>
-      </ul>
-    </div>
-  </nav>
+  <div data-site-navigation></div>
 
   <main class="section profile-page">
     <div class="container">
 
       <div id="profile-empty" class="profile-empty" hidden>
         <h1>No wallet connected yet</h1>
-        <p>Connect a wallet from the main site to generate your PREEB profile.</p>
-        <a href="/#wallet" class="btn btn--primary btn--lg">Connect a Wallet</a>
+        <p>Choose a wallet to generate your PREEB profile.</p>
+        <div class="profile-link-choices" id="profile-connect-choices"></div>
+        <div class="profile-link-status" id="profile-connect-status" hidden></div>
       </div>
 
       <div id="profile-gate" class="profile-empty" hidden>
@@ -143,7 +133,8 @@
     </div>
   </footer>
 
-  <script src="/profile.js"></script>
+  <script src="/navigation.js?v=2"></script>
+  <script src="/profile.js?v=3"></script>
   <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

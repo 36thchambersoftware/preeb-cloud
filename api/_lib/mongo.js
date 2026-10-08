@@ -27,6 +27,27 @@ export async function getDb() {
     globalThis.__preebMongoClientPromise = createClient();
   }
 
-  const client = await globalThis.__preebMongoClientPromise;
-  return client.db(DB_NAME);
+  const clientPromise = globalThis.__preebMongoClientPromise;
+  try {
+    const client = await clientPromise;
+    return client.db(DB_NAME);
+  } catch (error) {
+    if (globalThis.__preebMongoClientPromise === clientPromise) {
+      globalThis.__preebMongoClientPromise = null;
+    }
+    throw error;
+  }
+}
+
+export async function resetMongoConnection() {
+  const clientPromise = globalThis.__preebMongoClientPromise;
+  globalThis.__preebMongoClientPromise = null;
+  if (!clientPromise) return;
+
+  try {
+    const client = await clientPromise;
+    await client.close();
+  } catch {
+    // A failed connection has nothing usable to close.
+  }
 }

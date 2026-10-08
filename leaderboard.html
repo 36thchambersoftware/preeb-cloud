@@ -15,23 +15,7 @@
   <link rel="stylesheet" href="/leaderboard.css" />
 </head>
 <body>
-  <nav class="nav" id="top">
-    <div class="nav__inner container">
-      <a href="/" class="nav__logo">
-        <span class="logo-ticker">PREEB</span>
-        <span class="logo-sub">A Cardano Stake Pool</span>
-      </a>
-      <ul class="nav__links">
-        <li><a href="/">Home</a></li>
-        <li><a href="/airdrop">Airdrop</a></li>
-        <li><a href="/leaderboard" aria-current="page">Leaderboard</a></li>
-        <li><a href="/wall">Guest Wall</a></li>
-      </ul>
-      <button class="nav__hamburger" aria-label="Toggle menu" aria-expanded="false">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-  </nav>
+  <div data-site-navigation></div>
 
   <main>
     <section class="board-hero">
@@ -113,6 +97,7 @@
     </div>
   </footer>
 
+  <script src="/navigation.js?v=2"></script>
   <script src="/leaderboard.js"></script>
   <script defer src="/_vercel/insights/script.js"></script>
 </body>

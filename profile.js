@@ -33,6 +33,7 @@
 
   let currentPrimaryStake = null;
   let lastProfileState = null;
+  let emptyWalletDetectTimer = null;
 
   // ─── Small shared helpers (ported from script.js) ──────────────
 
@@ -249,10 +250,28 @@
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
-      return await response.json();
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(body?.error || `HTTP ${response.status} from ${url}`);
+      }
+      return body;
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  async function requestProfileNonce(primaryStake) {
+    const url = `/api/profile?stake=${encodeURIComponent(primaryStake)}&nonce=1`;
+    const options = { headers: { Accept: 'application/json' } };
+    try {
+      return await fetchJsonWithTimeout(url, options);
+    } catch (firstError) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      try {
+        return await fetchJsonWithTimeout(url, options);
+      } catch {
+        throw firstError;
+      }
     }
   }
 
@@ -559,10 +578,7 @@
       const paymentAddress = await getRepresentativePaymentAddress(api);
 
       setLinkStatus('Requesting a signing challenge...');
-      const nonceResp = await fetchJsonWithTimeout(
-        `/api/profile?stake=${encodeURIComponent(primaryStake)}&nonce=1`,
-        { headers: { Accept: 'application/json' } }
-      );
+      const nonceResp = await requestProfileNonce(primaryStake);
 
       setLinkStatus(`Confirm the signature request in ${walletConfig.label} to prove ownership of ${shortenAddress(stakeAddress)}...`);
       const signResult = await api.signData(rewardAddressHex, textToHex(nonceResp.message));
@@ -806,10 +822,7 @@
       const paymentAddress = await getRepresentativePaymentAddress(api);
 
       setGateStatus('Requesting a signing challenge...');
-      const nonceResp = await fetchJsonWithTimeout(
-        `/api/profile?stake=${encodeURIComponent(primaryStake)}&nonce=1`,
-        { headers: { Accept: 'application/json' } }
-      );
+      const nonceResp = await requestProfileNonce(primaryStake);
 
       setGateStatus(`Confirm the signature request in ${walletConfig.label} to prove ownership...`);
       const signResult = await api.signData(rewardAddressHex, textToHex(nonceResp.message));
@@ -933,6 +946,24 @@
 
   // ─── Init ───────────────────────────────────────────────────────
 
+  function initEmptyProfileWalletChoices() {
+    const choices = document.getElementById('profile-connect-choices');
+    const status = document.getElementById('profile-connect-status');
+    if (!choices || !window.PreebNavigation) return;
+
+    const render = () => window.PreebNavigation.renderProfileChoices(choices, status, 'Connect');
+    if (render()) return;
+
+    let checkCount = 0;
+    emptyWalletDetectTimer = window.setInterval(() => {
+      checkCount += 1;
+      if (render() || checkCount >= 20) {
+        window.clearInterval(emptyWalletDetectTimer);
+        emptyWalletDetectTimer = null;
+      }
+    }, 1000);
+  }
+
   function init() {
     const yearEl = document.getElementById('year');
     if (yearEl) yearEl.textContent = new Date().getFullYear();
@@ -945,6 +976,7 @@
       const emptyEl = document.getElementById('profile-empty');
       if (loadingEl) loadingEl.hidden = true;
       if (emptyEl) emptyEl.hidden = false;
+      initEmptyProfileWalletChoices();
       return;
     }
 

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { getDb } from './_lib/mongo.js';
+import { getDb, resetMongoConnection } from './_lib/mongo.js';
 import { verifyCip8Signature } from './_lib/cip8.js';
 import { applyCors, checkRateLimit, getClientIp, rejectRateLimited } from './_lib/security.js';
 
@@ -9,6 +9,17 @@ const NONCES_COLLECTION = 'identity_link_nonces';
 
 function buildChallengeMessage(stake, nonce) {
   return `PREEB Profile Link\nstake:${stake}\nnonce:${nonce}`;
+}
+
+async function createNonceChallenge(db, stake) {
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const expiresAt = new Date(Date.now() + NONCE_TTL_SECONDS * 1000);
+  await db.collection(NONCES_COLLECTION).insertOne({ nonce, primaryStake: stake, expiresAt, used: false });
+  return {
+    nonce,
+    message: buildChallengeMessage(stake, nonce),
+    expiresIn: NONCE_TTL_SECONDS,
+  };
 }
 
 async function ensureIndexes(db) {
@@ -103,15 +114,23 @@ export default async function handler(req, res) {
           res.status(503).json({ error: 'Database unavailable, please try again shortly.' });
           return;
         }
-        const nonce = crypto.randomBytes(16).toString('hex');
-        const expiresAt = new Date(Date.now() + NONCE_TTL_SECONDS * 1000);
-        await db.collection(NONCES_COLLECTION).insertOne({ nonce, primaryStake: stake, expiresAt, used: false });
-        res.status(200).json({
-          nonce,
-          message: buildChallengeMessage(stake, nonce),
-          expiresIn: NONCE_TTL_SECONDS,
-        });
-        return;
+
+        try {
+          res.status(200).json(await createNonceChallenge(db, stake));
+          return;
+        } catch (firstError) {
+          console.warn('[PREEB] Retrying profile nonce after Mongo write failure:', firstError.message);
+          try {
+            await resetMongoConnection();
+            const retryDb = await getDb();
+            res.status(200).json(await createNonceChallenge(retryDb, stake));
+            return;
+          } catch (retryError) {
+            console.error('[PREEB] /api/profile nonce challenge failed after retry:', retryError);
+            res.status(503).json({ error: 'Profile verification is temporarily unavailable. Please try again in a moment.' });
+            return;
+          }
+        }
       }
 
       // Reading linked wallets is best-effort — a DB hiccup shouldn't block
@@ -238,4 +257,3 @@ export default async function handler(req, res) {
     res.status(500).json({ error: `Request failed: ${err.message}` });
   }
 }
-
