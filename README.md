@@ -90,9 +90,15 @@ phase because the current code does not call Discord's bot API.
 
 A claim campaign lets token X holders claim token Y from a per-campaign wallet,
 instead of the project paying minimum ADA for every recipient. This section
-covers what exists so far: campaigns, encrypted funding wallets, and snapshots.
-Funding checks, the claim transaction, the `/claim` pages and the owner reclaim
-sweep are still to come.
+covers what exists so far: the `/claim` pages, campaigns, encrypted funding
+wallets, and snapshots. Funding checks, the claim transaction and the owner
+reclaim sweep are still to come.
+
+- **Pages:** `/claim` lists the 12 most recent campaigns (open first, upcoming
+  ones with a live countdown, closed ones greyed out), `/claim/new` creates one,
+  and `/claim/<id>` is the shareable page for a single campaign.
+- **API:** `GET/POST /api/claim/campaigns`, `GET /api/claim/<id>`,
+  `GET /api/claim/token-info`, and `POST /api/claim/run-snapshots` (cron only).
 
 - **Funding wallet:** each campaign gets its own enterprise wallet. Its seed is
   stored in `claim_wallets`, encrypted with AES-256-GCM using

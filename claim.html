@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PREEB Token Claims</title>
+  <meta name="description" content="Claim tokens from a snapshot of Cardano holders. Browse open, upcoming and finished claim campaigns." />
+  <link rel="canonical" href="https://preeb.cloud/claim" />
+  <meta property="og:title" content="PREEB Token Claims" />
+  <meta property="og:description" content="Claim tokens from a snapshot of Cardano holders." />
+  <meta property="og:image" content="https://preeb.cloud/og-image.png" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/claim.css?v=1" />
+</head>
+<body>
+  <div data-site-navigation></div>
+
+  <main>
+    <section class="claim-hero">
+      <div class="container claim-hero__inner">
+        <div>
+          <span class="section__eyebrow" id="claim-eyebrow">Token claims</span>
+          <h1 class="section__title" id="claim-title">Claim your tokens</h1>
+          <p class="section__subtitle" id="claim-subtitle">
+            Projects snapshot their holders, fund a campaign wallet, and holders claim from it.
+          </p>
+        </div>
+        <a class="btn btn--primary" id="claim-create-link" href="/claim/new">Create a campaign</a>
+      </div>
+    </section>
+
+    <section class="section section--mid">
+      <div class="container">
+        <p class="claim-message" id="claim-message" role="status" hidden></p>
+
+        <div id="claim-list-view" hidden>
+          <div class="claim-grid" id="claim-grid"></div>
+          <p class="claim-empty" id="claim-empty" hidden>No claim campaigns yet. Be the first to create one.</p>
+          <p class="claim-note">Showing the 12 most recent campaigns.</p>
+        </div>
+
+        <div id="claim-detail-view" hidden></div>
+
+        <form id="claim-create-view" class="claim-form" hidden novalidate>
+          <fieldset class="claim-fieldset">
+            <legend>1. Your wallet</legend>
+            <p class="claim-help">
+              The wallet you connect owns the campaign and is the only place unclaimed tokens can be
+              reclaimed to. It must be verified on your profile first.
+            </p>
+            <div class="claim-wallets" id="claim-wallet-buttons"></div>
+            <p class="claim-help" id="claim-wallet-status">No wallet connected.</p>
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>2. About the campaign</legend>
+            <label class="claim-label" for="f-title">Title</label>
+            <input id="f-title" maxlength="80" required />
+            <label class="claim-label" for="f-description">Description</label>
+            <textarea id="f-description" rows="3" maxlength="1000"></textarea>
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>3. Token to give away</legend>
+            <div class="claim-row">
+              <div>
+                <label class="claim-label" for="y-policy">Policy ID</label>
+                <input id="y-policy" maxlength="56" placeholder="56-character policy ID" />
+              </div>
+              <div>
+                <label class="claim-label" for="y-name">Asset name</label>
+                <input id="y-name" maxlength="64" />
+                <label class="claim-check"><input type="checkbox" id="y-name-hex" /> Asset name is hex</label>
+              </div>
+            </div>
+            <button type="button" class="btn btn--outline btn--sm" id="y-lookup">Look up token</button>
+            <div class="claim-row">
+              <div>
+                <label class="claim-label" for="y-ticker">Ticker</label>
+                <input id="y-ticker" maxlength="12" />
+              </div>
+              <div>
+                <label class="claim-label" for="y-decimals">Decimals</label>
+                <input id="y-decimals" type="number" min="0" max="19" value="0" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>4. Who can claim</legend>
+            <div class="claim-switch" role="radiogroup" aria-label="Holder source">
+              <label><input type="radio" name="source" value="koios" checked /> Holders of a token</label>
+              <label><input type="radio" name="source" value="json" /> Upload a list</label>
+            </div>
+
+            <div id="source-koios">
+              <div class="claim-row">
+                <div>
+                  <label class="claim-label" for="x-policy">Holder token policy ID</label>
+                  <input id="x-policy" maxlength="56" placeholder="56-character policy ID" />
+                </div>
+                <div>
+                  <label class="claim-label" for="x-name">Asset name (optional)</label>
+                  <input id="x-name" maxlength="64" />
+                  <label class="claim-check"><input type="checkbox" id="x-name-hex" /> Asset name is hex</label>
+                </div>
+              </div>
+              <p class="claim-help">Leave the asset name empty to include every asset under the policy, such as an NFT collection.</p>
+              <button type="button" class="btn btn--outline btn--sm" id="x-lookup">Look up image</button>
+            </div>
+
+            <div id="source-json" hidden>
+              <label class="claim-label" for="holder-file">Holder list (JSON)</label>
+              <input id="holder-file" type="file" accept="application/json,.json" />
+              <textarea id="holder-json" rows="6" placeholder='["addr1...", {"address": "stake1...", "amount": "10"}]'></textarea>
+              <p class="claim-help">Addresses or stake addresses. Include an <code>amount</code> for each when using manual amounts.</p>
+            </div>
+
+            <label class="claim-label" for="snapshot-at">Snapshot time</label>
+            <input id="snapshot-at" type="datetime-local" />
+            <p class="claim-help">Leave empty to snapshot right away. A snapshot is taken only once, at this time.</p>
+
+            <div class="claim-row">
+              <div>
+                <label class="claim-label" for="min-balance">Minimum balance to qualify</label>
+                <input id="min-balance" inputmode="numeric" placeholder="0" />
+              </div>
+              <div>
+                <label class="claim-check claim-check--block"><input type="checkbox" id="exclude-scripts" checked /> Skip script and contract addresses</label>
+              </div>
+            </div>
+            <label class="claim-label" for="exclude-list">Addresses to exclude (one per line)</label>
+            <textarea id="exclude-list" rows="2"></textarea>
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>5. How much each person gets</legend>
+            <label class="claim-label" for="distribution-mode">Distribution</label>
+            <select id="distribution-mode">
+              <option value="fixed">Same amount for every holder</option>
+              <option value="proportional">Split a total by holder balance</option>
+              <option value="manual">Amounts from the uploaded list</option>
+            </select>
+            <label class="claim-label" for="distribution-amount" id="distribution-amount-label">Amount per holder</label>
+            <input id="distribution-amount" inputmode="decimal" />
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>6. Claim period</legend>
+            <div class="claim-row">
+              <div>
+                <label class="claim-label" for="claim-start">Claims open (optional)</label>
+                <input id="claim-start" type="datetime-local" />
+              </div>
+              <div>
+                <label class="claim-label" for="claim-end">Claims close (optional)</label>
+                <input id="claim-end" type="datetime-local" />
+              </div>
+            </div>
+            <p class="claim-help">After the close time no claims work, and you can reclaim the leftover tokens and ADA from the campaign wallet.</p>
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>7. Picture</legend>
+            <div class="claim-images" id="image-choices"></div>
+            <label class="claim-label" for="image-url">Or paste an image URL (https:// or ipfs://)</label>
+            <input id="image-url" maxlength="500" />
+          </fieldset>
+
+          <p class="claim-message claim-message--error" id="form-error" role="alert" hidden></p>
+          <button type="submit" class="btn btn--primary" id="form-submit">Create campaign</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script src="/navigation.js?v=3"></script>
+  <script src="/claim.js?v=1"></script>
+  <script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>

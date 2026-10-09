@@ -15,5 +15,5 @@ jobs:
           CLAIM_CRON_SECRET: ${{ secrets.CLAIM_CRON_SECRET }}
         run: |
           curl --fail-with-body --silent --show-error --max-time 90 \
-            -X POST "https://preeb.cloud/api/claim/run-snapshots" \
+            -X POST "https://www.preeb.cloud/api/claim/run-snapshots" \
             -H "Authorization: Bearer $CLAIM_CRON_SECRET"

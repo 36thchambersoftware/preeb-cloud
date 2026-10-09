@@ -6,6 +6,8 @@
     { "source": "/profile", "destination": "/profile.html" },
     { "source": "/profile/:stake", "destination": "/profile.html" },
     { "source": "/airdrop", "destination": "/airdrop.html" },
+    { "source": "/claim", "destination": "/claim.html" },
+    { "source": "/claim/:id", "destination": "/claim.html" },
     { "source": "/leaderboard", "destination": "/leaderboard.html" },
     { "source": "/wall", "destination": "/wall.html" }
   ]

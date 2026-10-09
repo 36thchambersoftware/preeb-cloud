@@ -66,13 +66,9 @@
     return converted;
   }
 
-  function rewardHexToStakeAddress(rewardHex) {
-    const bytes = hexToBytes(rewardHex);
-    if (!bytes.length) throw new Error('Connected wallet returned an empty reward address');
-
-    const hrp = (bytes[0] & 0x0f) === 1 ? 'stake' : 'stake_test';
+  function bech32Encode(hrp, bytes) {
     const data = convertBits(bytes, 8, 5);
-    if (!data) throw new Error('Could not read the connected wallet reward address');
+    if (!data) throw new Error('Could not read the address returned by the wallet');
 
     const charset = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
     const expandedHrp = [];
@@ -87,6 +83,18 @@
       checksum.push((checksumValue >> (5 * (5 - i))) & 31);
     }
     return `${hrp}1${data.concat(checksum).map((value) => charset[value]).join('')}`;
+  }
+
+  function rewardHexToStakeAddress(rewardHex) {
+    const bytes = hexToBytes(rewardHex);
+    if (!bytes.length) throw new Error('Connected wallet returned an empty reward address');
+    return bech32Encode((bytes[0] & 0x0f) === 1 ? 'stake' : 'stake_test', bytes);
+  }
+
+  function addressHexToBech32(addressHex) {
+    const bytes = hexToBytes(addressHex);
+    if (!bytes.length) throw new Error('Connected wallet returned an empty address');
+    return bech32Encode((bytes[0] & 0x0f) === 1 ? 'addr' : 'addr_test', bytes);
   }
 
   async function connectAndOpenProfile(walletConfig, setStatus) {
@@ -146,7 +154,7 @@
   const isHome = path === '/';
   const isCurrent = (href) => {
     if (href === '/') return isHome;
-    return path === href || path === `${href}/` || path === `${href}.html`;
+    return path === href || path.startsWith(`${href}/`) || path === `${href}.html`;
   };
 
   mount.outerHTML = `
@@ -158,9 +166,8 @@
         </a>
         <ul class="nav__links" id="primary-navigation">
           <li><a href="/"${isCurrent('/') ? ' aria-current="page"' : ''}>Home</a></li>
-          <li><a href="/#about">About</a></li>
-          <li><a href="/#community">Community</a></li>
           <li><a href="/airdrop"${isCurrent('/airdrop') ? ' aria-current="page"' : ''}>Airdrop</a></li>
+          <li><a href="/claim"${isCurrent('/claim') ? ' aria-current="page"' : ''}>Claim</a></li>
           <li><a href="/leaderboard"${isCurrent('/leaderboard') ? ' aria-current="page"' : ''}>Leaderboard</a></li>
           <li><a href="/wall"${isCurrent('/wall') ? ' aria-current="page"' : ''}>Guest Wall</a></li>
           <li class="nav__profile-item">
@@ -232,5 +239,7 @@
   window.PreebNavigation = {
     getAvailableWallets,
     renderProfileChoices,
+    rewardHexToStakeAddress,
+    addressHexToBech32,
   };
 })();

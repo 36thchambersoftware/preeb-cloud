@@ -117,13 +117,13 @@ export default async function handler(req, res) {
       return;
     }
 
-    if (!route && req.method === 'GET') {
+    if (route === 'campaigns' && req.method === 'GET') {
       res.setHeader('Cache-Control', 'public, s-maxage=15, stale-while-revalidate=60');
       res.status(200).json({ campaigns: await listPublicCampaigns(await getDb()) });
       return;
     }
 
-    if (!route && req.method === 'POST') {
+    if (route === 'campaigns' && req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
       const ownerStake = String(body?.ownerStake || '').trim();
       if (!ownerStake || !readWalletSession(req).includes(ownerStake)) {
@@ -155,7 +155,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.status(route ? 404 : 405).json({ error: 'Not found' });
+    res.status(404).json({ error: 'Not found' });
   } catch (error) {
     if (error instanceof ClaimInputError) {
       res.status(400).json({ error: error.message });

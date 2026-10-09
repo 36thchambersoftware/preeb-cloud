@@ -137,7 +137,7 @@ export function parseCampaignInput(body, { ownerStake, now = new Date(), network
   if (source !== 'koios' && source !== 'json') {
     throw new ClaimInputError('Snapshot source must be koios or json.');
   }
-  if (source === 'json' && mode !== 'manual' && !Array.isArray(body.snapshot.holders) && typeof body.snapshot.holders !== 'string') {
+  if (source === 'json' && !Array.isArray(body.snapshot.holders) && typeof body.snapshot.holders !== 'string') {
     throw new ClaimInputError('A holder list is required.');
   }
   if (source === 'koios' && mode === 'manual') {
