@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "bech32": "^2.0.0",
     "mongodb": "^6.10.0",
     "tweetnacl": "^1.0.3"

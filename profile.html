@@ -22,6 +22,24 @@
   <main class="section profile-page">
     <div class="container">
 
+      <section class="profile-section profile-identity" aria-labelledby="discord-identity-heading">
+        <div class="profile-section__header-row">
+          <div>
+            <h1 id="discord-identity-heading">Discord Identity</h1>
+            <p class="profile-section__sub" id="discord-identity-description">Connect Discord to see and manage the wallets linked to your identity.</p>
+          </div>
+          <button class="btn btn--discord btn--sm" id="discord-auth-btn" type="button">Connect Discord</button>
+        </div>
+        <div class="profile-identity__account" id="discord-identity-account" hidden>
+          <img class="profile-identity__avatar" id="discord-identity-avatar" alt="" hidden />
+          <div>
+            <strong id="discord-identity-name"></strong>
+            <span id="discord-identity-username"></span>
+          </div>
+        </div>
+        <div class="profile-link-status" id="discord-identity-status" hidden></div>
+      </section>
+
       <div id="profile-empty" class="profile-empty" hidden>
         <h1>No wallet connected yet</h1>
         <p>Choose a wallet to generate your PREEB profile.</p>
@@ -134,7 +152,7 @@
   </footer>
 
   <script src="/navigation.js?v=2"></script>
-  <script src="/profile.js?v=3"></script>
+  <script src="/profile.js?v=7"></script>
   <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

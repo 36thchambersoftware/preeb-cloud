@@ -40,6 +40,45 @@
   gap: var(--space-2xl);
 }
 
+.profile-identity {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-2xl);
+}
+
+.profile-identity h1 {
+  font-family: var(--font-heading);
+  font-size: 1.3rem;
+  margin-bottom: var(--space-xs);
+}
+
+.profile-identity__account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.profile-identity__account > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.profile-identity__account span {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.profile-identity__avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 /* ─── Hero Card ─── */
 .profile-card {
   display: grid;

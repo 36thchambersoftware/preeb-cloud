@@ -1,10 +1,16 @@
 import crypto from 'node:crypto';
 import { getDb, resetMongoConnection } from './_lib/mongo.js';
 import { verifyCip8Signature } from './_lib/cip8.js';
+import {
+  ensureIdentityIndexes,
+  findIdentityByStake,
+  linkVerifiedWallet,
+  listWallets,
+} from './_lib/identity.js';
 import { applyCors, checkRateLimit, getClientIp, rejectRateLimited } from './_lib/security.js';
+import { addWalletToSession, readDiscordSession, readWalletSession } from './_lib/discord-auth.js';
 
 const NONCE_TTL_SECONDS = 300;
-const IDENTITIES_COLLECTION = 'identities';
 const NONCES_COLLECTION = 'identity_link_nonces';
 
 function buildChallengeMessage(stake, nonce) {
@@ -33,41 +39,7 @@ async function ensureIndexes(db) {
     console.warn('[PREEB] Could not ensure Mongo indexes (non-fatal):', err.message);
   }
   globalThis.__preebProfileIndexesReady = true;
-}
-
-// Documents in `identities` are designed to eventually be shared with the
-// preebot Discord bot's own user records (currently a separate `user`
-// collection keyed by Discord snowflake id, with a `wallets: { stake:
-// paymentAddress }` map). `wallets` here is grouped by chain (only `cardano`
-// today) so other chains can be added later without a schema rewrite, and
-// there is no "primary" wallet — every linked wallet is an equal entry point
-// into the same identity. preeb.cloud never writes to the bot's existing
-// collection.
-function findIdentityByStake(db, stake) {
-  return db.collection(IDENTITIES_COLLECTION).findOne({ [`wallets.cardano.${stake}`]: { $exists: true } });
-}
-
-async function getOrCreateIdentity(db, stake, paymentAddress) {
-  const existing = await findIdentityByStake(db, stake);
-  if (existing) return existing;
-
-  const now = new Date();
-  const insertResult = await db.collection(IDENTITIES_COLLECTION).insertOne({
-    discordId: null,
-    telegramId: null,
-    xHandle: null,
-    wallets: { cardano: { [stake]: paymentAddress || null } },
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  return {
-    _id: insertResult.insertedId,
-    discordId: null,
-    telegramId: null,
-    xHandle: null,
-    wallets: { cardano: { [stake]: paymentAddress || null } },
-  };
+  await ensureIdentityIndexes(db);
 }
 
 export default async function handler(req, res) {
@@ -145,7 +117,12 @@ export default async function handler(req, res) {
       }
 
       if (!doc) {
-        res.status(200).json({ primaryStake: stake, wallets: [stake], discordId: null });
+        res.status(200).json({
+          primaryStake: stake,
+          wallets: [stake],
+          discordId: null,
+          discordLinked: false,
+        });
         return;
       }
 
@@ -153,6 +130,7 @@ export default async function handler(req, res) {
         primaryStake: stake,
         wallets: Object.keys(doc.wallets?.cardano || {}),
         discordId: doc.discordId || null,
+        discordLinked: Boolean(doc.discordId),
       });
       return;
     }
@@ -216,37 +194,44 @@ export default async function handler(req, res) {
 
       await db.collection(NONCES_COLLECTION).updateOne({ _id: nonceDoc._id }, { $set: { used: true } });
 
-      const identity = await getOrCreateIdentity(db, primaryStake, purpose === 'verify' ? paymentAddress : null);
+      const discordId = readDiscordSession(req)?.user?.id || null;
 
-      if (purpose === 'link') {
-        const conflict = await findIdentityByStake(db, verified.stakeAddress);
-        if (conflict && String(conflict._id) !== String(identity._id)) {
-          res.status(400).json({ error: 'This wallet is already linked to a different profile.' });
-          return;
-        }
-
-        await db.collection(IDENTITIES_COLLECTION).updateOne(
-          { _id: identity._id },
-          {
-            $set: {
-              [`wallets.cardano.${verified.stakeAddress}`]: paymentAddress || null,
-              updatedAt: new Date(),
-            },
-          }
-        );
-      } else {
-        await db.collection(IDENTITIES_COLLECTION).updateOne(
-          { _id: identity._id },
-          { $set: { updatedAt: new Date() } }
-        );
+      // Adding a wallet to a profile requires having already proven ownership
+      // of that profile; otherwise anyone could attach wallets to a stranger's.
+      if (purpose === 'link' && !readWalletSession(req).includes(primaryStake)) {
+        res.status(403).json({ error: 'Verify ownership of this profile before linking another wallet.' });
+        return;
       }
 
-      const updated = await db.collection(IDENTITIES_COLLECTION).findOne({ _id: identity._id });
+      let updated;
+      try {
+        if (purpose === 'verify') {
+          updated = await linkVerifiedWallet(db, { stake: primaryStake, paymentAddress, discordId });
+        } else {
+          // Linking a second wallet: the freshly signed wallet joins whatever
+          // identity already owns the profile being viewed.
+          await linkVerifiedWallet(db, { stake: primaryStake, discordId });
+          updated = await linkVerifiedWallet(db, {
+            stake: verified.stakeAddress,
+            paymentAddress,
+            discordId,
+            anchorStake: primaryStake,
+          });
+        }
+      } catch (linkError) {
+        res.status(400).json({ error: linkError.message });
+        return;
+      }
+
+      addWalletToSession(req, res, verified.stakeAddress);
+      if (purpose === 'link') addWalletToSession(req, res, primaryStake);
+
       res.status(200).json({
         primaryStake,
-        wallets: Object.keys(updated?.wallets?.cardano || {}),
+        wallets: listWallets(updated),
         linkedWallet: verified.stakeAddress,
         verified: purpose === 'verify',
+        discordLinked: Boolean(updated?.discordId),
       });
       return;
     }

@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/claim/[...path].js": { "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/profile", "destination": "/profile.html" },
     { "source": "/profile/:stake", "destination": "/profile.html" },

@@ -1,0 +1,19 @@
+name: Claim snapshots
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-due-snapshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger due claim snapshots
+        env:
+          CLAIM_CRON_SECRET: ${{ secrets.CLAIM_CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -X POST "https://preeb.cloud/api/claim/run-snapshots" \
+            -H "Authorization: Bearer $CLAIM_CRON_SECRET"

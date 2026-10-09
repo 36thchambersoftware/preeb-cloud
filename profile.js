@@ -34,6 +34,7 @@
   let currentPrimaryStake = null;
   let lastProfileState = null;
   let emptyWalletDetectTimer = null;
+  let discordSession = null;
 
   // ─── Small shared helpers (ported from script.js) ──────────────
 
@@ -344,6 +345,97 @@
     el.classList.toggle('is-error', Boolean(isError));
   }
 
+  function getDiscordAvatarUrl(user) {
+    if (!user?.avatar || !user.id) return '';
+    const extension = user.avatar.startsWith('a_') ? 'gif' : 'png';
+    return `https://cdn.discordapp.com/avatars/${encodeURIComponent(user.id)}/${encodeURIComponent(user.avatar)}.${extension}?size=96`;
+  }
+
+  function setDiscordStatus(message, isError = false) {
+    const el = document.getElementById('discord-identity-status');
+    if (!el) return;
+    el.hidden = !message;
+    el.textContent = message || '';
+    el.classList.toggle('is-error', Boolean(isError));
+  }
+
+  function renderDiscordIdentity(session) {
+    const button = document.getElementById('discord-auth-btn');
+    const account = document.getElementById('discord-identity-account');
+    const avatar = document.getElementById('discord-identity-avatar');
+    const name = document.getElementById('discord-identity-name');
+    const username = document.getElementById('discord-identity-username');
+    const description = document.getElementById('discord-identity-description');
+    if (!button || !account || !description) return;
+
+    if (!session?.authenticated) {
+      account.hidden = true;
+      button.textContent = 'Connect Discord';
+      button.className = 'btn btn--discord btn--sm';
+      description.textContent = 'Connect Discord to see and manage the wallets linked to your identity.';
+      return;
+    }
+
+    const user = session.user;
+    account.hidden = false;
+    if (name) name.textContent = user.globalName || user.username;
+    if (username) username.textContent = `@${user.username}`;
+
+    const avatarUrl = getDiscordAvatarUrl(user);
+    if (avatar) {
+      avatar.hidden = !avatarUrl;
+      if (avatarUrl) {
+        avatar.src = avatarUrl;
+        avatar.alt = `${user.globalName || user.username}'s Discord avatar`;
+      }
+    }
+
+    const count = Array.isArray(session.wallets) ? session.wallets.length : 0;
+    description.textContent = count > 0
+      ? `${count} Cardano wallet${count === 1 ? '' : 's'} linked to this Discord identity.`
+      : 'Discord is connected. Verify a Cardano wallet below to link it to this identity.';
+    button.textContent = 'Log Out of Discord';
+    button.className = 'btn btn--outline btn--sm';
+  }
+
+  async function loadDiscordIdentity() {
+    try {
+      discordSession = await fetchJsonWithTimeout('/api/auth/session', {
+        headers: { Accept: 'application/json' },
+      });
+      renderDiscordIdentity(discordSession);
+      setDiscordStatus('');
+      return discordSession;
+    } catch (error) {
+      discordSession = null;
+      renderDiscordIdentity(null);
+      setDiscordStatus(getErrorMessage(error), true);
+      return null;
+    }
+  }
+
+  async function onDiscordAuthClick() {
+    if (!discordSession?.authenticated) {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/api/auth/discord?returnTo=${encodeURIComponent(returnTo)}`);
+      return;
+    }
+
+    setDiscordStatus('Disconnecting Discord...');
+    try {
+      const response = await fetch('/api/auth/session', {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`Could not disconnect Discord (HTTP ${response.status})`);
+      discordSession = { authenticated: false };
+      renderDiscordIdentity(discordSession);
+      setDiscordStatus('Discord disconnected. Your verified wallet links were not removed.');
+    } catch (error) {
+      setDiscordStatus(getErrorMessage(error), true);
+    }
+  }
+
   function getHighestRole(adaDelegatedLovelace) {
     let best = null;
     for (const role of DELEGATOR_ROLES) {
@@ -599,6 +691,7 @@
       if (linkResp.error) throw new Error(linkResp.error);
 
       setLinkStatus(`Linked ${shortenAddress(linkResp.linkedWallet)} to this profile.`);
+      await loadDiscordIdentity();
       await loadProfile(primaryStake);
     } catch (err) {
       setLinkStatus(getErrorMessage(err), true);
@@ -845,6 +938,7 @@
 
       markOwnershipVerified(primaryStake);
       showGate(false);
+      await loadDiscordIdentity();
       await loadProfile(primaryStake);
     } catch (err) {
       setGateStatus(getErrorMessage(err), true);
@@ -964,12 +1058,20 @@
     }, 1000);
   }
 
-  function init() {
+  async function init() {
     const yearEl = document.getElementById('year');
     if (yearEl) yearEl.textContent = new Date().getFullYear();
 
     const match = window.location.pathname.match(/\/profile\/([^/]+)/);
     const stake = match ? decodeURIComponent(match[1]) : null;
+    const discordButton = document.getElementById('discord-auth-btn');
+    if (discordButton) discordButton.addEventListener('click', onDiscordAuthClick);
+
+    const session = await loadDiscordIdentity();
+    if (!stake && session?.authenticated && session.wallets?.length > 0) {
+      window.location.replace(`/profile/${encodeURIComponent(session.wallets[0])}`);
+      return;
+    }
 
     if (!stake) {
       const loadingEl = document.getElementById('profile-loading');
@@ -989,7 +1091,13 @@
     if (downloadBtn) downloadBtn.addEventListener('click', onDownloadClick);
     if (shareBtn) shareBtn.addEventListener('click', onShareClick);
 
-    if (!isOwnershipVerified(stake)) {
+    // The server's signed wallet session is the real proof of ownership (it is
+    // what lets Discord login attach to this wallet's identity); localStorage
+    // is only a fallback if the session endpoint is unreachable.
+    const ownershipVerified = session
+      ? Array.isArray(session.verifiedWallets) && session.verifiedWallets.includes(stake)
+      : isOwnershipVerified(stake);
+    if (!ownershipVerified) {
       const loadingEl = document.getElementById('profile-loading');
       if (loadingEl) loadingEl.hidden = true;
       showGate(true);
