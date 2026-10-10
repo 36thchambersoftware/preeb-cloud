@@ -29,6 +29,7 @@
     { keys: ['vespr'],  label: 'Vespr' },
     { keys: ['typhoncip30', 'typhon'], label: 'Typhon' },
     { keys: ['lace'],   label: 'Lace' },
+    { keys: ['1am'],    label: '1AM' },
   ];
   const FLOWMASS_POLICY_ID = '1d0cf168b30d27c6619e7ca7c18e02c8cebc011bf056216a1ea829ff';
   const DELEGATOR_ROLES = [
@@ -203,6 +204,7 @@
     vespr: '<img src="images/wallet-logos/vespr.png" alt="" loading="lazy" />',
     typhon: '<img src="images/wallet-logos/typhon.svg" alt="" loading="lazy" />',
     lace: '<span class="wallet-brand-icon__fallback">L</span>',
+    '1am': '<img src="images/wallet-logos/1am.svg" alt="" loading="lazy" />',
   };
 
   function getWalletIconMarkup(walletKey, walletLabel) {
@@ -213,6 +215,7 @@
     if (key === 'vespr' || label.includes('vespr')) return WALLET_ICON_MARKUP.vespr;
     if (key === 'typhoncip30' || key === 'typhon' || label.includes('typhon')) return WALLET_ICON_MARKUP.typhon;
     if (key === 'lace' || label.includes('lace')) return WALLET_ICON_MARKUP.lace;
+    if (key === '1am' || label.includes('1am')) return WALLET_ICON_MARKUP['1am'];
     return '';
   }
 

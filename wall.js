@@ -12,6 +12,7 @@
     { keys: ['vespr'],  label: 'Vespr' },
     { keys: ['typhoncip30', 'typhon'], label: 'Typhon' },
     { keys: ['lace'],   label: 'Lace' },
+    { keys: ['1am'],    label: '1AM' },
   ];
 
   const ROLE_IMAGES = new Map([
