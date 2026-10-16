@@ -10,6 +10,7 @@ import {
   getPublicCampaign,
   isCampaignId,
   listPublicCampaigns,
+  listSnapshot,
   parseCampaignInput,
   parseTokenReference,
   retrySnapshot,
@@ -163,23 +164,45 @@ export default async function handler(req, res) {
       return;
     }
 
-    if (isCampaignId(route) && ['prepare', 'snapshot'].includes(segments[1]) && req.method === 'POST') {
-      const db = await getDb();
-      const existing = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: route }, { projection: { 'owner.stake': 1 } });
-      if (!existing) {
-        res.status(404).json({ error: 'Campaign not found.' });
-        return;
-      }
-      const viewerStakes = readWalletSession(req);
-      if (!viewerStakes.includes(existing.owner.stake)) {
-        res.status(403).json({ error: 'Only the campaign owner can do this.' });
+    // Vercel's catch-all only matches one path segment, so campaign actions take the id as a query parameter.
+    if (['prepare', 'retry-snapshot', 'snapshot'].includes(route)) {
+      const id = String(req.query?.id || '');
+      if (!isCampaignId(id)) {
+        res.status(400).json({ error: 'A valid campaign id is required.' });
         return;
       }
 
-      const result = segments[1] === 'prepare' ? await prepareLanes(db, route) : await retrySnapshot(db, route);
-      const campaign = await getPublicCampaign(db, route, new Date(), viewerStakes);
-      res.status(200).json({ campaign, ...result });
-      return;
+      if (route === 'snapshot' && req.method === 'GET') {
+        const result = await listSnapshot(await getDb(), id, {
+          query: String(req.query?.q || ''),
+          page: req.query?.page,
+          sort: String(req.query?.sort || 'claim'),
+          dir: String(req.query?.dir || 'desc'),
+          handles: req.query?.handles !== '0',
+        });
+        res.setHeader('Cache-Control', 'public, s-maxage=10, stale-while-revalidate=30');
+        res.status(200).json(result);
+        return;
+      }
+
+      if (route !== 'snapshot' && req.method === 'POST') {
+        const db = await getDb();
+        const existing = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: id }, { projection: { 'owner.stake': 1 } });
+        if (!existing) {
+          res.status(404).json({ error: 'Campaign not found.' });
+          return;
+        }
+        const viewerStakes = readWalletSession(req);
+        if (!viewerStakes.includes(existing.owner.stake)) {
+          res.status(403).json({ error: 'Only the campaign owner can do this.' });
+          return;
+        }
+
+        const result = route === 'prepare' ? await prepareLanes(db, id) : await retrySnapshot(db, id);
+        const campaign = await getPublicCampaign(db, id, new Date(), viewerStakes);
+        res.status(200).json({ campaign, ...result });
+        return;
+      }
     }
 
     if (isCampaignId(route) && req.method === 'GET') {

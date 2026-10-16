@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { addressBelongsToStake } from './cardano-address.js';
+import { addressBelongsToStake, parseAddress } from './cardano-address.js';
+import { lookupHandle, resolveHandleStake } from './handle.js';
 import { generateClaimWallet } from './claim-wallet.js';
 import { laneCountFor } from './claim-funding.js';
 import {
@@ -52,6 +53,8 @@ export async function ensureClaimIndexes(db) {
       db.collection(CAMPAIGNS_COLLECTION).createIndex({ 'owner.stake': 1 }),
       db.collection(CAMPAIGNS_COLLECTION).createIndex({ 'snapshot.status': 1, 'snapshot.scheduledFor': 1 }),
       db.collection(ENTITLEMENTS_COLLECTION).createIndex({ campaignId: 1, key: 1 }, { unique: true }),
+      db.collection(ENTITLEMENTS_COLLECTION).createIndex({ campaignId: 1, amountNum: -1, key: 1 }),
+      db.collection(ENTITLEMENTS_COLLECTION).createIndex({ campaignId: 1, balanceNum: -1, key: 1 }),
       db.collection(LANES_COLLECTION).createIndex({ campaignId: 1, index: 1 }, { unique: true }),
     ]);
     globalThis.__preebClaimIndexesReady = true;
@@ -462,6 +465,9 @@ export async function runSnapshot(db, campaignId, { now = new Date(), fetchImpl 
         result.entitlements.slice(start, start + 1000).map((entitlement) => ({
           campaignId,
           ...entitlement,
+          // Only used to sort the public snapshot table; amounts themselves stay exact strings.
+          amountNum: Number(entitlement.amount),
+          balanceNum: Number(entitlement.balance),
           status: 'unclaimed',
           createdAt: now,
         })),
@@ -543,4 +549,119 @@ export async function runDueSnapshots(db, { now = new Date(), fetchImpl = fetch,
     results.push({ id: _id, ...(await runSnapshot(db, _id, { now, fetchImpl })) });
   }
   return results;
+}
+
+export const SNAPSHOT_PAGE_SIZE = 25;
+
+/** Turns what someone typed into an entitlement filter: a wallet, a $handle, or an address prefix. */
+async function snapshotFilterFor(query, fetchImpl) {
+  const text = query.trim();
+  if (!text || text.length > 120) return { empty: true };
+
+  const parsed = parseAddress(text);
+  if (parsed) {
+    const keys = [text];
+    if (parsed.stakeAddress) keys.push(parsed.stakeAddress);
+    return { filter: { key: { $in: keys } } };
+  }
+
+  if (text.startsWith('$') || (!/^(stake|addr)/i.test(text) && /^[a-z0-9_.-]{2,40}$/i.test(text))) {
+    const stake = await resolveHandleStake(text, { fetchImpl });
+    return stake ? { filter: { key: stake } } : { empty: true, note: `No wallet found for the handle ${text.startsWith('$') ? text : `$${text}`}.` };
+  }
+
+  if (/^(stake|addr)[0-9a-z_]{3,}$/i.test(text)) {
+    return { filter: { key: { $regex: `^${text.replace(/[^0-9a-zA-Z_]/g, '')}` } } };
+  }
+  return { empty: true, note: 'Enter a stake address, a payment address or an ADA Handle.' };
+}
+
+const HANDLE_TTL_MS = 24 * 60 * 60 * 1000;
+const SORT_FIELDS = { claim: 'amountNum', holding: 'balanceNum' };
+const sortableCampaigns = globalThis.__preebSortableCampaigns || new Set();
+globalThis.__preebSortableCampaigns = sortableCampaigns;
+
+// Rows from before the sortable number columns existed get them filled in once.
+async function ensureSortableNumbers(collection, campaignId) {
+  if (sortableCampaigns.has(campaignId) || typeof collection.updateMany !== 'function') return;
+  for (const [field, source] of [['amountNum', '$amount'], ['balanceNum', '$balance']]) {
+    await collection.updateMany({ campaignId, [field]: { $exists: false } }, [{ $set: { [field]: { $toDouble: source } } }]);
+  }
+  sortableCampaigns.add(campaignId);
+}
+
+/**
+ * Adds each visible wallet's ADA Handle. Answers are stored on the entitlement
+ * for a day, and lookups stop after a short time budget, so one page view never
+ * waits on the Handle API for long. Wallets not answered yet are reported as pending.
+ */
+async function attachHandles(collection, rows, { fetchImpl, budgetMs = 3500, concurrency = 4, now = Date.now() } = {}) {
+  const queue = rows.filter((row) => /^stake1/.test(row.key) && !(row.handleCheckedAt && now - new Date(row.handleCheckedAt).getTime() < HANDLE_TTL_MS));
+  const deadline = Date.now() + budgetMs;
+  let pending = 0;
+
+  async function worker() {
+    while (queue.length) {
+      const row = queue.shift();
+      if (Date.now() > deadline) {
+        pending += 1;
+        continue;
+      }
+      const handle = await lookupHandle(row.key, { fetchImpl });
+      if (handle === undefined) {
+        pending += 1;
+        continue;
+      }
+      row.handle = handle;
+      row.handleCheckedAt = new Date(now);
+      await collection.updateOne({ _id: row._id }, { $set: { handle, handleCheckedAt: row.handleCheckedAt } });
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return pending;
+}
+
+/** One page of a campaign's snapshot, optionally narrowed to a wallet and sorted by claim or holding. */
+export async function listSnapshot(db, campaignId, { query = '', page = 0, sort = 'claim', dir = 'desc', handles = false, fetchImpl = fetch } = {}) {
+  const base = { campaignId };
+  let filter = base;
+
+  if (query.trim()) {
+    const target = await snapshotFilterFor(query, fetchImpl);
+    if (target.empty) return { entries: [], total: 0, page: 0, pageSize: SNAPSHOT_PAGE_SIZE, note: target.note || null, pendingHandles: 0 };
+    filter = { ...base, ...target.filter };
+  }
+
+  const collection = db.collection(ENTITLEMENTS_COLLECTION);
+  const sortField = SORT_FIELDS[sort] || SORT_FIELDS.claim;
+  const direction = dir === 'asc' ? 1 : -1;
+  await ensureSortableNumbers(collection, campaignId);
+
+  const safePage = Math.min(Math.max(Number.parseInt(page, 10) || 0, 0), 1000);
+  const [total, rows] = await Promise.all([
+    collection.countDocuments(filter),
+    collection.find(filter, { projection: { key: 1, balance: 1, amount: 1, status: 1, claimedAt: 1, handle: 1, handleCheckedAt: 1 } })
+      .sort({ [sortField]: direction, key: 1 })
+      .skip(safePage * SNAPSHOT_PAGE_SIZE)
+      .limit(SNAPSHOT_PAGE_SIZE)
+      .toArray(),
+  ]);
+
+  const pendingHandles = handles ? await attachHandles(collection, rows, { fetchImpl }) : 0;
+
+  return {
+    entries: rows.map((row) => ({
+      key: row.key,
+      handle: row.handle || null,
+      balance: row.balance,
+      amount: row.amount,
+      status: row.status,
+      claimedAt: row.claimedAt ? new Date(row.claimedAt).toISOString() : null,
+    })),
+    total,
+    page: safePage,
+    pageSize: SNAPSHOT_PAGE_SIZE,
+    note: query.trim() && total === 0 ? 'That wallet is not in the snapshot.' : null,
+    pendingHandles,
+  };
 }

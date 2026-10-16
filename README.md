@@ -98,7 +98,8 @@ owner reclaim sweep are still to come.
   ones with a live countdown, closed ones greyed out), `/claim/new` creates one,
   and `/claim/<id>` is the shareable page for a single campaign.
 - **API:** `GET/POST /api/claim/campaigns`, `GET /api/claim/<id>`,
-  `POST /api/claim/<id>/prepare` (owner only), `GET /api/claim/token-info`, and
+  `GET /api/claim/snapshot?id=<id>` (the public snapshot table), `POST /api/claim/prepare?id=<id>` and
+  `POST /api/claim/retry-snapshot?id=<id>` (owner only), `GET /api/claim/token-info`, and
   `POST /api/claim/run-snapshots` (cron only).
 - **Token details come from the chain:** the server looks up the token when a
   campaign is created and ignores any decimals or ticker sent by the browser.
@@ -141,7 +142,17 @@ owner reclaim sweep are still to come.
   atomic, so it can never run twice.
 - **Failed snapshots:** a failed snapshot is retried automatically three times,
   then marked failed. The owner gets a **Retry snapshot** button on the campaign
-  page (`POST /api/claim/<id>/snapshot`).
+  page (`POST /api/claim/retry-snapshot?id=<id>`).
+- **Snapshot table:** a collapsed section on the campaign page lists the whole
+  snapshot (25 per page, sortable by holding or claim, largest claim first by
+  default). ADA Handles replace addresses where a wallet has one (looked up with
+  a short time budget and stored on the row for a day; Copy still copies the
+  address). It has a filter for a stake address, payment address or ADA
+  Handle. A wallet connected in the site header is looked up automatically and
+  shown as "You qualify for ...". The header remembers the connected wallet
+  (`localStorage`) and silently reconnects when the wallet already trusts the
+  site; `window.PreebNavigation` exposes `getConnectedWallet()` and a
+  `preeb:wallet` event for pages that need it.
 - **Owner:** creating a campaign requires a wallet verified in this browser
   (the signed wallet-session cookie). The reclaim address must be a base
   address of that same wallet.

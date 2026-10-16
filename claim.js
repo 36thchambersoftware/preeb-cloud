@@ -289,7 +289,7 @@
     button.disabled = true;
     button.textContent = 'Preparing…';
     try {
-      await request(`${API}/${campaign.id}/prepare`, { method: 'POST' });
+      await request(`${API}/prepare?id=${campaign.id}`, { method: 'POST' });
       await showDetail(campaign.id);
     } catch (error) {
       button.disabled = false;
@@ -302,7 +302,7 @@
     button.disabled = true;
     button.textContent = 'Retrying…';
     try {
-      await request(`${API}/${campaign.id}/snapshot`, { method: 'POST' });
+      await request(`${API}/retry-snapshot?id=${campaign.id}`, { method: 'POST' });
       await showDetail(campaign.id);
     } catch (error) {
       button.disabled = false;
@@ -311,14 +311,14 @@
     }
   }
 
-  function renderPanels(wrap, campaign) {
-    const panel = el('div', 'claim-panel');
+  function buildClaimPanel(campaign) {
+    const panel = el('div', 'claim-panel claim-panel--claim');
     panel.appendChild(el('h3', null, 'Claiming'));
     const message = el('p');
     panel.appendChild(message);
 
     if (campaign.status === 'closed') {
-      message.textContent = 'Claims for this campaign are closed. The details above stay available for reference.';
+      message.textContent = 'Claims for this campaign are closed. The details below stay available for reference.';
     } else if (campaign.snapshot.status === 'failed') {
       message.textContent = 'The snapshot could not be completed, so claims stay closed until it succeeds.';
     } else if (campaign.status === 'upcoming') {
@@ -332,27 +332,34 @@
     } else {
       message.textContent = 'Funded and ready. Claim transactions are not live yet. Check back soon.';
     }
-    wrap.appendChild(panel);
+    return panel;
+  }
 
-    if (!campaign.viewerIsOwner || campaign.status === 'closed') return;
+  // Only the campaign's owner, with the owner's wallet connected, gets the controls.
+  function buildOwnerPanel(campaign) {
+    if (!campaign.viewerIsOwner || campaign.status === 'closed') return null;
 
     const owner = el('div', 'claim-panel claim-panel--owner');
     owner.appendChild(el('h3', null, 'Owner'));
+    const wallet = window.PreebNavigation?.getConnectedWallet?.();
+    if (!wallet || wallet.stake !== campaign.owner) {
+      owner.appendChild(el('p', null, `Connect the wallet that created this campaign (${shorten(campaign.owner, 12, 8)}) to manage it.`));
+      return owner;
+    }
+
     if (campaign.snapshot.status === 'failed') {
       owner.appendChild(el('p', null, `The snapshot failed: ${campaign.snapshot.error || 'unknown error'}. It was retried automatically; you can run it again now.`));
       const retry = el('button', 'btn btn--primary', 'Retry snapshot');
       retry.type = 'button';
       retry.addEventListener('click', () => retrySnapshotRequest(campaign, retry));
       owner.appendChild(retry);
-      wrap.appendChild(owner);
-      return;
+      return owner;
     }
     if (campaign.snapshot.status === 'taken' && campaign.phase !== 'claiming' && campaign.phase !== 'preparing') {
       owner.appendChild(el('p', null, `Send ${formatTokens(campaign, campaign.funding?.tokensRequired ?? campaign.snapshot.totalAmount)} `
         + `and at least ${formatAmount(campaign.funding?.lovelaceRequired ?? 0, 6)} ADA to the campaign wallet. `
         + 'The ADA is a deposit for the claim lanes and comes back to you when you reclaim.'));
-      const address = el('code', 'claim-address', campaign.walletAddress);
-      owner.appendChild(address);
+      owner.appendChild(el('code', 'claim-address', campaign.walletAddress));
       owner.appendChild(copyButton(campaign.walletAddress, 'Copy wallet address'));
       owner.appendChild(el('p', null, `Currently held: ${fundingLine(campaign)}.`));
     }
@@ -363,10 +370,245 @@
       owner.appendChild(button);
     }
     owner.appendChild(el('p', 'claim-warning', 'Reclaiming leftover funds is not available yet. Only fund a campaign you are ready to run.'));
-    wrap.appendChild(owner);
+    return owner;
   }
 
+  // Snapshot table ---------------------------------------------------------
+
+  const snapshotViews = new Map();
+
+  // An ADA Handle stands in for the address when there is one; Copy always copies the address.
+  function walletCell(entry) {
+    const cell = el('td', 'claim-table__wallet');
+    const label = el('code', null, entry.handle || shorten(entry.key, 14, 8));
+    label.title = entry.key;
+    cell.appendChild(label);
+    cell.appendChild(copyButton(entry.key, 'Copy', 'claim-copy'));
+    return cell;
+  }
+
+  function createSnapshotView(campaign) {
+    const id = campaign.id;
+    const state = { query: '', page: 0, token: 0, sort: 'claim', dir: 'desc', retries: 0, loaded: false };
+    const holderTicker = campaign.tokenX?.ticker || campaign.tokenX?.name || '';
+
+    const mine = el('div', 'claim-mine');
+    const panel = el('details', 'claim-snapshot');
+    const title = el('summary', 'claim-snapshot__head');
+    title.appendChild(el('h3', null, 'Snapshot'));
+    const summary = el('span', 'claim-card__meta', `${campaign.snapshot.eligibleCount ?? 0} wallets`);
+    title.appendChild(summary);
+    panel.appendChild(title);
+
+    const content = el('div', 'claim-snapshot__content');
+    panel.appendChild(content);
+
+    const search = el('form', 'claim-snapshot__search');
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.placeholder = 'Check a wallet: stake address, payment address or $handle';
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Search the snapshot');
+    const clear = el('button', 'btn btn--outline btn--sm', 'Clear');
+    clear.type = 'button';
+    search.append(input, clear);
+    content.appendChild(search);
+
+    const note = el('p', 'claim-snapshot__note');
+    note.hidden = true;
+    content.appendChild(note);
+
+    const table = el('table', 'claim-table');
+    const headRow = el('tr');
+    const sortButtons = [];
+    const columns = [
+      { label: 'Wallet' },
+      ...(campaign.tokenX ? [{ label: 'Holding', sort: 'holding' }] : []),
+      { label: 'Claim', sort: 'claim' },
+      { label: 'Status' },
+    ];
+    columns.forEach((column) => {
+      const th = el('th');
+      if (column.sort) {
+        const button = el('button', 'claim-sort');
+        button.type = 'button';
+        button.dataset.sort = column.sort;
+        button.appendChild(document.createTextNode(`${column.label} `));
+        button.appendChild(el('span', 'claim-sort__arrow'));
+        button.addEventListener('click', () => {
+          state.dir = state.sort === column.sort && state.dir === 'desc' ? 'asc' : 'desc';
+          state.sort = column.sort;
+          state.page = 0;
+          load();
+        });
+        sortButtons.push(button);
+        th.appendChild(button);
+      } else {
+        th.textContent = column.label;
+      }
+      headRow.appendChild(th);
+    });
+    table.appendChild(el('thead')).appendChild(headRow);
+    const body = el('tbody');
+    table.appendChild(body);
+    const wrap = el('div', 'claim-table__wrap');
+    wrap.appendChild(table);
+    content.appendChild(wrap);
+
+    const pager = el('div', 'claim-snapshot__pager');
+    const previous = el('button', 'btn btn--outline btn--sm', 'Previous');
+    const next = el('button', 'btn btn--outline btn--sm', 'Next');
+    previous.type = 'button';
+    next.type = 'button';
+    const pageLabel = el('span', 'claim-card__meta');
+    pager.append(previous, pageLabel, next);
+    content.appendChild(pager);
+
+    const row = (entry, highlight) => {
+      const tr = el('tr', highlight ? 'is-mine' : '');
+      tr.appendChild(walletCell(entry));
+      if (campaign.tokenX) tr.appendChild(el('td', null, `${formatAmount(entry.balance, campaign.tokenX.decimals || 0)} ${holderTicker}`));
+      tr.appendChild(el('td', null, `${formatAmount(entry.amount, campaign.tokenY.decimals)} ${campaign.tokenY.ticker}`));
+      tr.appendChild(el('td', null, entry.status === 'claimed' ? 'Claimed' : 'Unclaimed'));
+      return tr;
+    };
+
+    function fetchPage(query, page, { handles = true } = {}) {
+      const params = new URLSearchParams({
+        id,
+        q: query,
+        page: String(page),
+        sort: state.sort,
+        dir: state.dir,
+        handles: handles ? '1' : '0',
+      });
+      return request(`${API}/snapshot?${params}`);
+    }
+
+    async function load() {
+      const ticket = ++state.token;
+      state.loaded = true;
+      try {
+        const result = await fetchPage(state.query, state.page);
+        if (ticket !== state.token) return;
+        const mineKey = window.PreebNavigation?.getConnectedWallet?.()?.stake;
+        body.replaceChildren(...result.entries.map((entry) => row(entry, entry.key === mineKey)));
+        if (!result.entries.length) {
+          const empty = el('tr');
+          const cell = el('td', 'claim-table__empty', state.query ? 'No matching wallet.' : 'No wallets.');
+          cell.colSpan = headRow.children.length;
+          empty.appendChild(cell);
+          body.appendChild(empty);
+        }
+        note.hidden = !result.note;
+        note.textContent = result.note || '';
+
+        const pages = Math.max(1, Math.ceil(result.total / result.pageSize));
+        summary.textContent = state.query
+          ? `${result.total} matching wallet${result.total === 1 ? '' : 's'}`
+          : `${result.total.toLocaleString('en-US')} wallets`;
+        pageLabel.textContent = `Page ${result.page + 1} of ${pages}`;
+        previous.disabled = result.page <= 0;
+        next.disabled = result.page + 1 >= pages;
+        pager.hidden = pages <= 1;
+        sortButtons.forEach((button) => {
+          const active = button.dataset.sort === state.sort;
+          button.classList.toggle('is-active', active);
+          button.querySelector('.claim-sort__arrow').textContent = active ? (state.dir === 'desc' ? '▼' : '▲') : '';
+          button.closest('th').setAttribute('aria-sort', active ? (state.dir === 'desc' ? 'descending' : 'ascending') : 'none');
+        });
+
+        // Handles come from a rate-limited service, so unanswered wallets are retried a few times.
+        if (result.pendingHandles > 0 && state.retries < 3) {
+          state.retries += 1;
+          setTimeout(() => { if (ticket === state.token) load(); }, 3000);
+        } else if (!result.pendingHandles) {
+          state.retries = 0;
+        }
+      } catch (error) {
+        note.hidden = false;
+        note.textContent = error.message;
+      }
+    }
+
+    async function checkMine() {
+      const wallet = window.PreebNavigation?.getConnectedWallet?.();
+      mine.className = 'claim-mine';
+      mine.replaceChildren();
+      if (!wallet) {
+        mine.appendChild(el('span', null, 'Connect your wallet to see what you qualify for.'));
+        const connect = el('button', 'btn btn--outline btn--sm', 'Connect wallet');
+        connect.type = 'button';
+        connect.addEventListener('click', () => document.getElementById('nav-wallet-btn')?.click());
+        mine.appendChild(connect);
+        return;
+      }
+      try {
+        const result = await fetchPage(wallet.stake, 0, { handles: false });
+        const entry = result.entries[0];
+        mine.classList.add(entry ? 'claim-mine--yes' : 'claim-mine--no');
+        mine.appendChild(el('strong', null, `${wallet.label} · ${shorten(wallet.stake, 10, 6)}`));
+        mine.appendChild(el('span', null, entry
+          ? `You qualify for ${formatAmount(entry.amount, campaign.tokenY.decimals)} ${campaign.tokenY.ticker}${entry.status === 'claimed' ? ' (already claimed)' : ''}.`
+          : 'This wallet is not in the snapshot.'));
+        if (entry && state.loaded) load();
+      } catch {
+        mine.appendChild(el('span', null, 'Could not check your wallet right now.'));
+      }
+    }
+
+    // The table loads when it is first opened, so closed snapshots cost nothing.
+    panel.addEventListener('toggle', () => {
+      if (panel.open && !state.loaded) load();
+    });
+
+    let typing = null;
+    const runSearch = () => {
+      state.query = input.value.trim();
+      state.page = 0;
+      state.retries = 0;
+      load();
+    };
+    input.addEventListener('input', () => {
+      clearTimeout(typing);
+      typing = setTimeout(runSearch, 400);
+    });
+    search.addEventListener('submit', (event) => {
+      event.preventDefault();
+      clearTimeout(typing);
+      runSearch();
+    });
+    clear.addEventListener('click', () => {
+      input.value = '';
+      runSearch();
+    });
+    previous.addEventListener('click', () => { state.page -= 1; state.retries = 0; load(); });
+    next.addEventListener('click', () => { state.page += 1; state.retries = 0; load(); });
+
+    return { panel, mine, load, checkMine, isOpen: () => panel.open, state };
+  }
+
+  function snapshotViewFor(campaign) {
+    let view = snapshotViews.get(campaign.id);
+    if (!view) {
+      view = createSnapshotView(campaign);
+      snapshotViews.set(campaign.id, view);
+      view.checkMine();
+    } else if (view.isOpen()) {
+      view.load();
+    }
+    return view;
+  }
+
+  window.addEventListener('preeb:wallet', () => {
+    snapshotViews.forEach((view) => view.checkMine());
+    if (currentCampaign && !els.detailView.hidden) renderDetail(currentCampaign);
+  });
+
+  let currentCampaign = null;
+
   function renderDetail(campaign) {
+    currentCampaign = campaign;
     document.title = `${campaign.title} · PREEB Claims`;
     els.eyebrow.textContent = 'Claim campaign';
     els.title.textContent = campaign.title;
@@ -405,6 +647,15 @@
       progress.appendChild(el('p', 'claim-card__meta', `${claimed} of ${eligible} wallets have claimed`));
       wrap.appendChild(progress);
     }
+
+    wrap.appendChild(buildClaimPanel(campaign));
+
+    if (campaign.snapshot.status === 'failed') {
+      wrap.appendChild(el('p', 'claim-message claim-message--error', `The snapshot could not be taken: ${campaign.snapshot.error || 'unknown error'}`));
+    }
+
+    const snapshotView = campaign.snapshot.status === 'taken' ? snapshotViewFor(campaign) : null;
+    if (snapshotView) wrap.appendChild(snapshotView.mine);
 
     const facts = el('dl', 'claim-facts');
     const ticker = campaign.tokenY.ticker;
@@ -455,12 +706,10 @@
       copyLabel: 'Copy address',
     })));
     wrap.appendChild(facts);
+    if (snapshotView) wrap.appendChild(snapshotView.panel);
 
-    if (campaign.snapshot.status === 'failed') {
-      wrap.appendChild(el('p', 'claim-message claim-message--error', `The snapshot could not be taken: ${campaign.snapshot.error || 'unknown error'}`));
-    }
-
-    renderPanels(wrap, campaign);
+    const ownerPanel = buildOwnerPanel(campaign);
+    if (ownerPanel) wrap.appendChild(ownerPanel);
 
     els.detailView.replaceChildren(wrap);
     els.detailView.hidden = false;
@@ -672,28 +921,38 @@
     };
   }
 
+  // Uses the wallet connected in the site header, so there is one connection for the whole site.
+  function applyWallet(wallet) {
+    const status = field('claim-wallet-status');
+    if (!wallet) {
+      create.owner = null;
+      status.textContent = 'No wallet connected.';
+      return;
+    }
+    if (!wallet.address) {
+      create.owner = null;
+      status.textContent = `${wallet.label} did not share an address. Try reconnecting.`;
+      return;
+    }
+    if (!create.verified.includes(wallet.stake)) {
+      create.owner = null;
+      status.replaceChildren(
+        document.createTextNode(`${wallet.label} (${shorten(wallet.stake, 10, 6)}) is not verified in this browser yet. `),
+        Object.assign(el('a', null, 'Verify it on your profile'), { href: `/profile/${encodeURIComponent(wallet.stake)}` }),
+        document.createTextNode(', then come back.'),
+      );
+      return;
+    }
+    create.owner = { stake: wallet.stake, payoutAddress: wallet.address };
+    status.textContent = `Connected ${wallet.label}: ${shorten(wallet.stake, 12, 8)}. Unclaimed funds can only be reclaimed to ${shorten(wallet.address, 12, 8)}.`;
+    status.classList.remove('is-invalid');
+  }
+
   async function connectWallet(walletConfig) {
     const status = field('claim-wallet-status');
-    const nav = window.PreebNavigation;
     try {
       status.textContent = `Connecting ${walletConfig.label}…`;
-      const api = await walletConfig.provider.enable();
-      const [rewardHex] = await api.getRewardAddresses();
-      const stake = nav.rewardHexToStakeAddress(rewardHex);
-      const payoutAddress = nav.addressHexToBech32(await api.getChangeAddress());
-
-      if (!create.verified.includes(stake)) {
-        create.owner = null;
-        status.replaceChildren(
-          document.createTextNode('This wallet is not verified in this browser yet. '),
-          Object.assign(el('a', null, 'Verify it on your profile'), { href: `/profile/${encodeURIComponent(stake)}` }),
-          document.createTextNode(', then come back.'),
-        );
-        return;
-      }
-      create.owner = { stake, payoutAddress };
-      status.textContent = `Connected ${walletConfig.label}: ${shorten(stake, 12, 8)}. Unclaimed funds can only be reclaimed to ${shorten(payoutAddress, 12, 8)}.`;
-      status.classList.remove('is-invalid');
+      applyWallet(await window.PreebNavigation.connectWallet(walletConfig));
     } catch (error) {
       create.owner = null;
       status.textContent = error?.message || 'Could not connect the wallet.';
@@ -857,9 +1116,12 @@
       create.verified = [];
     }
 
+    window.addEventListener('preeb:wallet', (event) => applyWallet(event.detail));
+    applyWallet(window.PreebNavigation?.getConnectedWallet?.() || null);
+
     const buttons = field('claim-wallet-buttons');
     const wallets = window.PreebNavigation?.getAvailableWallets() || [];
-    if (!wallets.length) {
+    if (!wallets.length && !create.owner) {
       field('claim-wallet-status').textContent = 'No Cardano wallet extension detected in this browser.';
     }
     wallets.forEach((walletConfig) => {

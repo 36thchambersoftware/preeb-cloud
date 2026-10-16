@@ -16,6 +16,7 @@ import {
 import {
   ClaimInputError,
   deriveStatus,
+  listSnapshot,
   normalizeImageUrl,
   parseCampaignInput,
   retrySnapshot,
@@ -482,4 +483,125 @@ test('claims stay closed while the snapshot has failed, and the owner can rerun 
   assert.equal(db.campaigns[0].claimStartsAt.getTime() > Date.now() - 1000, true);
 
   await assert.rejects(() => retrySnapshot(db, 'abcdefghjk'), /Only a failed snapshot/);
+});
+
+function createSnapshotDb(entitlements) {
+  const matches = (doc, filter) => Object.entries(filter).every(([key, expected]) => {
+    const actual = doc[key];
+    if (expected && typeof expected === 'object') {
+      if ('$in' in expected) return expected.$in.includes(actual);
+      if ('$regex' in expected) return new RegExp(expected.$regex).test(actual);
+    }
+    return actual === expected;
+  });
+  return {
+    collection: () => ({
+      countDocuments: async (filter) => entitlements.filter((doc) => matches(doc, filter)).length,
+      updateOne: async (filter, update) => {
+        Object.assign(entitlements.find((doc) => doc._id === filter._id), update.$set);
+      },
+      find: (filter) => {
+        let rows = entitlements.filter((doc) => matches(doc, filter));
+        const chain = {
+          sort: (order) => {
+            const [field, direction] = Object.entries(order)[0];
+            rows = [...rows].sort((a, b) => ((a[field] - b[field]) * direction) || a.key.localeCompare(b.key));
+            return chain;
+          },
+          skip: (count) => { rows = rows.slice(count); return chain; },
+          limit: (count) => { rows = rows.slice(0, count); return chain; },
+          toArray: async () => rows,
+        };
+        return chain;
+      },
+    }),
+  };
+}
+
+test('the snapshot lists the largest shares first, in pages', async () => {
+  const entitlements = Array.from({ length: 60 }, (_, index) => ({
+    campaignId: 'abcdefghjk',
+    key: `stake1holder${String(index).padStart(3, '0')}`,
+    balance: String(index + 1),
+    amount: String((index + 1) * 10),
+    amountNum: (index + 1) * 10,
+    status: 'unclaimed',
+  }));
+  const db = createSnapshotDb(entitlements);
+
+  const first = await listSnapshot(db, 'abcdefghjk', {});
+  assert.equal(first.total, 60);
+  assert.equal(first.entries.length, 25);
+  assert.equal(first.entries[0].amount, '600');
+
+  const third = await listSnapshot(db, 'abcdefghjk', { page: 2 });
+  assert.equal(third.entries.length, 10);
+  assert.equal(third.entries.at(-1).amount, '10');
+});
+
+test('the snapshot can be searched by stake, payment address, handle or prefix', async () => {
+  const entitlements = [
+    { campaignId: 'abcdefghjk', key: STAKE_ADDRESS, balance: '5', amount: '50', amountNum: 50, status: 'unclaimed' },
+    { campaignId: 'abcdefghjk', key: 'stake1other', balance: '1', amount: '10', amountNum: 10, status: 'claimed' },
+  ];
+  const db = createSnapshotDb(entitlements);
+
+  assert.equal((await listSnapshot(db, 'abcdefghjk', { query: STAKE_ADDRESS })).entries[0].amount, '50');
+  // A payment address resolves to the stake address it belongs to.
+  assert.equal((await listSnapshot(db, 'abcdefghjk', { query: BASE_ADDRESS })).entries[0].key, STAKE_ADDRESS);
+  assert.equal((await listSnapshot(db, 'abcdefghjk', { query: 'stake1other' })).entries[0].status, 'claimed');
+  assert.equal((await listSnapshot(db, 'abcdefghjk', { query: 'stake1uy' })).total, 1);
+
+  const missing = await listSnapshot(db, 'abcdefghjk', { query: 'stake1u8f3uqzv9lc84555ejzuq005lhaahfm3m9ytr68ke27k6hc9xy0kc' });
+  assert.equal(missing.total, 0);
+  assert.equal(missing.note, 'That wallet is not in the snapshot.');
+
+  const handle = async () => ({ ok: true, json: async () => ({ resolved_addresses: { ada: BASE_ADDRESS } }) });
+  assert.equal((await listSnapshot(db, 'abcdefghjk', { query: '$ockz', fetchImpl: handle })).entries[0].key, STAKE_ADDRESS);
+  const noHandle = async () => ({ ok: false });
+  assert.match((await listSnapshot(db, 'abcdefghjk', { query: '$nobody', fetchImpl: noHandle })).note, /No wallet found for the handle \$nobody/);
+});
+
+test('the snapshot sorts by claim or holding in either direction', async () => {
+  const entitlements = [
+    { _id: 1, campaignId: 'abcdefghjk', key: 'stake1a', balance: '5', amount: '300', balanceNum: 5, amountNum: 300, status: 'unclaimed' },
+    { _id: 2, campaignId: 'abcdefghjk', key: 'stake1b', balance: '9', amount: '100', balanceNum: 9, amountNum: 100, status: 'unclaimed' },
+    { _id: 3, campaignId: 'abcdefghjk', key: 'stake1c', balance: '1', amount: '200', balanceNum: 1, amountNum: 200, status: 'unclaimed' },
+  ];
+  const db = createSnapshotDb(entitlements);
+  const keys = async (options) => (await listSnapshot(db, 'abcdefghjk', options)).entries.map((entry) => entry.key.slice(-1));
+
+  assert.deepEqual(await keys({}), ['a', 'c', 'b']);
+  assert.deepEqual(await keys({ sort: 'claim', dir: 'asc' }), ['b', 'c', 'a']);
+  assert.deepEqual(await keys({ sort: 'holding' }), ['b', 'a', 'c']);
+  assert.deepEqual(await keys({ sort: 'holding', dir: 'asc' }), ['c', 'a', 'b']);
+  assert.deepEqual(await keys({ sort: 'bogus; drop' }), ['a', 'c', 'b']);
+});
+
+test('handles replace addresses, are stored once, and unanswered wallets are reported', async () => {
+  const entitlements = [
+    { _id: 1, campaignId: 'abcdefghjk', key: 'stake1withhandle', balance: '5', amount: '300', amountNum: 300, status: 'unclaimed' },
+    { _id: 2, campaignId: 'abcdefghjk', key: 'stake1nohandle', balance: '5', amount: '200', amountNum: 200, status: 'unclaimed' },
+    { _id: 3, campaignId: 'abcdefghjk', key: 'stake1blocked', balance: '5', amount: '100', amountNum: 100, status: 'unclaimed' },
+    { _id: 4, campaignId: 'abcdefghjk', key: 'addr1enterprise', balance: '5', amount: '50', amountNum: 50, status: 'unclaimed' },
+  ];
+  const db = createSnapshotDb(entitlements);
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url.endsWith('stake1withhandle')) return { ok: true, json: async () => ({ default_handle: 'ockz' }) };
+    if (url.endsWith('stake1nohandle')) return { ok: false, status: 404 };
+    return { ok: false, status: 429 };
+  };
+
+  const first = await listSnapshot(db, 'abcdefghjk', { handles: true, fetchImpl });
+  assert.deepEqual(first.entries.map((entry) => entry.handle), ['$ockz', null, null, null]);
+  assert.equal(first.pendingHandles, 1);
+  assert.equal(calls.length, 3);
+
+  // Answered wallets are served from storage; only the rate-limited one is asked again.
+  calls.length = 0;
+  await listSnapshot(db, 'abcdefghjk', { handles: true, fetchImpl });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].endsWith('stake1blocked'));
 });

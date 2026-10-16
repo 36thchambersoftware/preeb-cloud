@@ -112,6 +112,7 @@
       } catch {
         // Session storage is optional; profile navigation still works without it.
       }
+      rememberWallet(walletConfig.key);
       window.location.href = `/profile/${encodeURIComponent(stakeAddress)}`;
     } catch (error) {
       setStatus(error?.message || String(error), true);
@@ -147,6 +148,96 @@
     return true;
   }
 
+  // Connected wallet shown in the header ---------------------------------------
+
+  const WALLET_STORAGE_KEY = 'preeb-nav-wallet';
+  const walletState = { wallet: null };
+
+  function shorten(value, head = 9, tail = 6) {
+    return value && value.length > head + tail + 1 ? `${value.slice(0, head)}…${value.slice(-tail)}` : value || '';
+  }
+
+  function emitWalletChange() {
+    window.dispatchEvent(new CustomEvent('preeb:wallet', { detail: walletState.wallet }));
+  }
+
+  function rememberWallet(key) {
+    try {
+      if (key) window.localStorage.setItem(WALLET_STORAGE_KEY, key);
+      else window.localStorage.removeItem(WALLET_STORAGE_KEY);
+    } catch {
+      // Storage can be unavailable (private mode); the wallet just will not be remembered.
+    }
+  }
+
+  function rememberedWalletKey() {
+    try {
+      return window.localStorage.getItem(WALLET_STORAGE_KEY) || window.sessionStorage.getItem('preeb-last-wallet-key');
+    } catch {
+      return null;
+    }
+  }
+
+  async function readWalletDetails(walletConfig, api) {
+    const rewardAddresses = await api.getRewardAddresses();
+    if (!Array.isArray(rewardAddresses) || rewardAddresses.length === 0) {
+      throw new Error('The wallet did not return a stake address.');
+    }
+    let address = '';
+    try {
+      address = addressHexToBech32(await api.getChangeAddress());
+    } catch {
+      // The stake address alone is enough to identify the wallet.
+    }
+    return {
+      key: walletConfig.key,
+      label: walletConfig.label,
+      stake: rewardHexToStakeAddress(rewardAddresses[0]),
+      address,
+    };
+  }
+
+  async function connectWallet(walletConfig) {
+    const api = await walletConfig.provider.enable();
+    walletState.wallet = await readWalletDetails(walletConfig, api);
+    rememberWallet(walletConfig.key);
+    emitWalletChange();
+    return walletState.wallet;
+  }
+
+  function disconnectWallet() {
+    walletState.wallet = null;
+    rememberWallet(null);
+    try {
+      window.sessionStorage.removeItem('preeb-last-wallet-key');
+    } catch {
+      // Nothing to clear.
+    }
+    emitWalletChange();
+  }
+
+  // Wallet extensions inject themselves after the page loads, so wait briefly for them.
+  async function restoreWallet() {
+    const key = rememberedWalletKey();
+    if (!key) return;
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const walletConfig = getAvailableWallets().find((candidate) => candidate.key === key);
+      if (walletConfig) {
+        try {
+          // Only reconnect silently when the wallet already trusts this site.
+          if (typeof walletConfig.provider.isEnabled === 'function' && await walletConfig.provider.isEnabled()) {
+            await connectWallet(walletConfig);
+          }
+        } catch {
+          // A failed silent reconnect leaves the "Connect wallet" button.
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
   const mount = document.querySelector('[data-site-navigation]');
   if (!mount) return;
 
@@ -171,6 +262,10 @@
           <li><a href="/leaderboard"${isCurrent('/leaderboard') ? ' aria-current="page"' : ''}>Leaderboard</a></li>
           <li><a href="/wall"${isCurrent('/wall') ? ' aria-current="page"' : ''}>Guest Wall</a></li>
           <li class="nav__profile-item">
+            <button type="button" class="nav-wallet" id="nav-wallet-btn" aria-haspopup="true">Connect wallet</button>
+            <div class="nav-profile-menu" id="nav-wallet-menu" hidden></div>
+          </li>
+          <li class="nav__profile-item">
             <button type="button" class="btn btn--outline btn--sm" id="nav-profile-btn">My Profile</button>
             <div class="nav-profile-menu" id="nav-profile-menu" hidden></div>
           </li>
@@ -194,9 +289,129 @@
     hamburger.setAttribute('aria-expanded', String(open));
   }
 
+  const walletButton = nav.querySelector('#nav-wallet-btn');
+  const walletMenu = nav.querySelector('#nav-wallet-menu');
+
+  function makeButton(text, onClick, className = 'btn btn--outline btn--sm') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = text;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  function copyRow(label, value) {
+    const row = document.createElement('div');
+    row.className = 'nav-wallet-row';
+    const text = document.createElement('span');
+    text.innerHTML = `<small>${label}</small><code></code>`;
+    text.querySelector('code').textContent = shorten(value, 14, 8);
+    row.appendChild(text);
+    const copy = makeButton('Copy', async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+        copy.textContent = 'Copied';
+      } catch {
+        copy.textContent = 'Failed';
+      }
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+    }, 'nav-wallet-copy');
+    row.appendChild(copy);
+    return row;
+  }
+
+  function renderWalletButton() {
+    const wallet = walletState.wallet;
+    walletButton.classList.toggle('nav-wallet--connected', Boolean(wallet));
+    walletButton.replaceChildren();
+    if (!wallet) {
+      walletButton.textContent = 'Connect wallet';
+      return;
+    }
+    const name = document.createElement('span');
+    name.className = 'nav-wallet__name';
+    name.textContent = wallet.label;
+    const id = document.createElement('span');
+    id.className = 'nav-wallet__id';
+    id.textContent = shorten(wallet.stake, 10, 6);
+    walletButton.append(name, id);
+    walletButton.title = `${wallet.label} · ${wallet.stake}`;
+  }
+
+  function renderWalletMenu() {
+    const wallet = walletState.wallet;
+    walletMenu.replaceChildren();
+
+    if (wallet) {
+      walletMenu.appendChild(copyRow('Stake address', wallet.stake));
+      if (wallet.address) walletMenu.appendChild(copyRow('Payment address', wallet.address));
+      const profile = document.createElement('a');
+      profile.className = 'btn btn--outline btn--sm';
+      profile.href = `/profile/${encodeURIComponent(wallet.stake)}`;
+      profile.textContent = 'My profile';
+      walletMenu.appendChild(profile);
+      walletMenu.appendChild(makeButton('Disconnect', () => {
+        disconnectWallet();
+        walletMenu.hidden = true;
+      }));
+      return;
+    }
+
+    const status = document.createElement('div');
+    status.className = 'nav-profile-menu__status';
+    status.hidden = true;
+    const wallets = getAvailableWallets();
+    if (wallets.length === 0) {
+      status.hidden = false;
+      status.textContent = 'No supported wallet extension detected. Install Eternl, Vespr, Typhon, or Lace.';
+    }
+    wallets.forEach((walletConfig) => {
+      walletMenu.appendChild(makeButton(`Connect ${walletConfig.label}`, async () => {
+        status.hidden = false;
+        status.classList.remove('is-error');
+        status.textContent = `Connecting to ${walletConfig.label}…`;
+        try {
+          await connectWallet(walletConfig);
+          walletMenu.hidden = true;
+        } catch (error) {
+          status.classList.add('is-error');
+          status.textContent = error?.message || 'Could not connect the wallet.';
+        }
+      }));
+    });
+    walletMenu.appendChild(status);
+  }
+
+  if (walletButton) {
+    renderWalletButton();
+    walletButton.addEventListener('click', () => {
+      if (!walletMenu.hidden) {
+        walletMenu.hidden = true;
+        return;
+      }
+      renderWalletMenu();
+      walletMenu.hidden = false;
+    });
+    window.addEventListener('preeb:wallet', () => {
+      renderWalletButton();
+      if (!walletMenu.hidden) renderWalletMenu();
+    });
+    document.addEventListener('click', (event) => {
+      if (!walletMenu.hidden && !walletMenu.contains(event.target) && !walletButton.contains(event.target)) {
+        walletMenu.hidden = true;
+      }
+    });
+    restoreWallet();
+  }
+
   if (profileButton) {
     const profileMenu = nav.querySelector('#nav-profile-menu');
     profileButton.addEventListener('click', () => {
+      if (walletState.wallet) {
+        window.location.href = `/profile/${encodeURIComponent(walletState.wallet.stake)}`;
+        return;
+      }
       if (!profileMenu.hidden) {
         profileMenu.hidden = true;
         return;
@@ -241,5 +456,8 @@
     renderProfileChoices,
     rewardHexToStakeAddress,
     addressHexToBech32,
+    getConnectedWallet: () => walletState.wallet,
+    connectWallet,
+    disconnectWallet,
   };
 })();

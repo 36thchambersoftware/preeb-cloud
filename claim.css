@@ -233,3 +233,39 @@ p.is-invalid { padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); }
 .claim-copy { padding: 0.15rem 0.6rem; border: 1px solid var(--color-border); border-radius: var(--radius-full); background: rgba(255, 255, 255, 0.05); color: var(--color-text-muted); font: inherit; font-size: 0.75rem; cursor: pointer; }
 .claim-copy:hover { color: var(--color-text); border-color: var(--color-cyan); }
 .claim-token__link { color: var(--color-cyan); font-size: 0.9rem; overflow-wrap: anywhere; }
+
+/* Snapshot table */
+.claim-mine { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; padding: 0.9rem 1.1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-card); color: var(--color-text-muted); }
+.claim-mine--yes { border-color: rgba(46, 204, 113, 0.5); background: rgba(46, 204, 113, 0.08); color: var(--color-text); }
+.claim-mine--no { border-color: rgba(246, 166, 35, 0.4); color: var(--color-text); }
+.claim-mine strong { font-family: var(--font-heading); }
+
+.claim-snapshot { display: flex; flex-direction: column; gap: 0.85rem; }
+.claim-snapshot__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.claim-snapshot__head h3 { font-family: var(--font-heading); }
+.claim-snapshot__search { display: flex; gap: 0.5rem; }
+.claim-snapshot__search input { flex: 1; min-width: 0; padding: 0.7rem 0.85rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.04); color: var(--color-text); font: inherit; }
+.claim-snapshot__search input:focus { outline: 2px solid var(--color-cyan); outline-offset: 1px; }
+.claim-snapshot__note { color: var(--color-gold); font-size: 0.9rem; }
+.claim-snapshot__pager { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+
+.claim-table__wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-card); }
+.claim-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.claim-table th { padding: 0.7rem 1rem; text-align: left; color: var(--color-text-muted); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+.claim-table td { padding: 0.6rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.04); white-space: nowrap; }
+.claim-table tr:last-child td { border-bottom: 0; }
+.claim-table tr.is-mine td { background: rgba(46, 204, 113, 0.1); }
+.claim-table__wallet { display: flex; align-items: center; gap: 0.6rem; }
+.claim-table__empty { text-align: center; color: var(--color-text-muted); }
+.claim-snapshot__pager .btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Collapsible snapshot and sortable headers */
+details.claim-snapshot { display: block; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-card); padding: 0; }
+.claim-snapshot > summary.claim-snapshot__head { cursor: pointer; list-style: none; padding: 1rem 1.25rem; display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.claim-snapshot > summary::-webkit-details-marker { display: none; }
+.claim-snapshot > summary h3::before { content: '▸'; display: inline-block; margin-right: 0.6rem; color: var(--color-cyan); transition: transform var(--transition); }
+.claim-snapshot[open] > summary h3::before { transform: rotate(90deg); }
+.claim-snapshot__content { display: flex; flex-direction: column; gap: 0.85rem; padding: 0 1.25rem 1.25rem; }
+.claim-sort { all: unset; cursor: pointer; display: inline-flex; gap: 0.3rem; align-items: center; color: inherit; text-transform: inherit; letter-spacing: inherit; font: inherit; }
+.claim-sort:hover, .claim-sort.is-active { color: var(--color-cyan); }
+.claim-sort__arrow { font-size: 0.65rem; min-width: 0.8em; }
