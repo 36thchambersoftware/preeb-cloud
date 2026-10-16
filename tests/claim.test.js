@@ -18,6 +18,7 @@ import {
   deriveStatus,
   normalizeImageUrl,
   parseCampaignInput,
+  retrySnapshot,
   runDueSnapshots,
   runSnapshot,
 } from '../api/_lib/claim-campaign.js';
@@ -187,12 +188,24 @@ test('fetchKoiosHolders pages until a short page and picks the right endpoint', 
 
 const OWNER_STAKE = STAKE_ADDRESS;
 
+const HOLDER_TOKEN = { policyId: 'a'.repeat(56), name: 'CryptoSockz', ticker: 'SOCKZ', decimals: 6, website: null, multiAsset: false };
+
+const TOKEN_INFO = {
+  policyId: 'b'.repeat(56),
+  assetNameHex: '706565',
+  decimals: 2,
+  decimalsSource: 'registry',
+  ticker: 'PEE',
+  name: 'Pee',
+  images: [{ ref: 'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa', source: 'cip25' }],
+};
+
 function baseBody(overrides = {}) {
   return {
     title: 'Flowmass claim',
     description: 'Claim your tokens',
     tokenX: { policyId: 'a'.repeat(56), assetNameHex: '' },
-    tokenY: { policyId: 'b'.repeat(56), assetNameHex: '706565', decimals: 2, ticker: 'PEE' },
+    tokenY: { policyId: 'b'.repeat(56), assetNameHex: '706565' },
     distribution: { mode: 'fixed', amountPerHolder: '10' },
     snapshot: { source: 'koios' },
     payoutAddress: BASE_ADDRESS,
@@ -204,6 +217,7 @@ test('parseCampaignInput builds a campaign and enforces the owner payout address
   const now = new Date('2026-01-01T00:00:00Z');
   const parsed = parseCampaignInput(baseBody({ claimEndsAt: '2026-02-01T00:00:00Z' }), {
     ownerStake: OWNER_STAKE,
+    tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN,
     now,
     network: 'mainnet',
   });
@@ -211,24 +225,92 @@ test('parseCampaignInput builds a campaign and enforces the owner payout address
   assert.equal(parsed.snapshot.scheduledFor.getTime(), now.getTime());
 
   assert.throws(() => parseCampaignInput(baseBody({ payoutAddress: ENTERPRISE_ADDRESS }), {
-    ownerStake: OWNER_STAKE, now, network: 'mainnet',
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
   }), ClaimInputError);
   assert.throws(() => parseCampaignInput(baseBody({ payoutAddress: BASE_ADDRESS }), {
-    ownerStake: OWNER_STAKE, now, network: 'preprod',
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'preprod',
   }), /preprod/);
   assert.throws(() => parseCampaignInput(baseBody({ claimEndsAt: '2025-12-31T00:00:00Z' }), {
-    ownerStake: OWNER_STAKE, now, network: 'mainnet',
-  }), /end after/);
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
+  }), /at least 24 hours/);
   assert.throws(() => parseCampaignInput(baseBody({ image: { url: 'http://x.test/a.png' } }), {
-    ownerStake: OWNER_STAKE, now, network: 'mainnet',
-  }), /https/);
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
+  }), /https:\/\/, ipfs:\/\/ or ar:\/\//);
   assert.throws(() => parseCampaignInput(baseBody({ distribution: { mode: 'manual' } }), {
-    ownerStake: OWNER_STAKE, now, network: 'mainnet',
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
   }), /uploaded holder list/);
 });
 
+test('parseCampaignInput ignores client decimals and defaults the image from the chain', () => {
+  const now = new Date('2026-01-01T00:00:00Z');
+  const body = baseBody({
+    tokenY: { policyId: 'b'.repeat(56), assetNameHex: '706565', decimals: 18, ticker: 'SCAM' },
+    distribution: { mode: 'fixed', amountPerHolder: '1.5' },
+  });
+  const parsed = parseCampaignInput(body, { ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet' });
+  assert.equal(parsed.tokenY.decimals, 2);
+  assert.equal(parsed.tokenY.ticker, 'PEE');
+  assert.equal(parsed.distribution.amountPerHolder, '150');
+  assert.equal(parsed.image, 'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa');
+
+  const tooPrecise = baseBody({ distribution: { mode: 'fixed', amountPerHolder: '1.555' } });
+  assert.throws(
+    () => parseCampaignInput(tooPrecise, { ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet' }),
+    (error) => error.field === 'distribution-amount' && /2 decimal places/.test(error.message),
+  );
+});
+
+test('the minimum balance is typed in whole tokens and stored in base units', () => {
+  const now = new Date('2026-01-01T00:00:00Z');
+  const options = { ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet' };
+  const parsed = parseCampaignInput(baseBody({ filters: { minBalance: '1,500.5' } }), options);
+  assert.equal(parsed.filters.minBalance, '1500500000');
+  assert.equal(parsed.tokenX.name, 'CryptoSockz');
+  assert.equal('assetNameHex' in parsed.tokenX, false);
+  assert.throws(
+    () => parseCampaignInput(baseBody({ filters: { minBalance: '1.1234567' } }), options),
+    (error) => error.field === 'min-balance',
+  );
+});
+
+test('claims open at least 15 minutes after the snapshot and stay open at least 24 hours', () => {
+  const now = new Date('2026-01-01T12:00:00Z');
+  const options = { ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet' };
+
+  // Empty start means exactly 15 minutes after the snapshot.
+  const defaulted = parseCampaignInput(baseBody(), options);
+  assert.equal(defaulted.claimStartsAt.toISOString(), '2026-01-01T12:15:00.000Z');
+
+  const scheduled = (extra) => baseBody({ snapshot: { source: 'koios', at: '2026-01-05T00:00:00Z' }, ...extra });
+  assert.equal(parseCampaignInput(scheduled(), options).claimStartsAt.toISOString(), '2026-01-05T00:15:00.000Z');
+
+  assert.throws(
+    () => parseCampaignInput(scheduled({ claimStartsAt: '2026-01-05T00:05:00Z' }), options),
+    (error) => error.field === 'claim-start' && /at least 15 minutes after the snapshot/.test(error.message),
+  );
+  assert.throws(
+    () => parseCampaignInput(baseBody({ claimStartsAt: '2026-01-01T11:00:00Z' }), options),
+    (error) => error.field === 'claim-start',
+  );
+  assert.equal(
+    parseCampaignInput(scheduled({ claimStartsAt: '2026-01-06T00:00:00Z' }), options).claimStartsAt.toISOString(),
+    '2026-01-06T00:00:00.000Z',
+  );
+
+  assert.throws(
+    () => parseCampaignInput(scheduled({ claimEndsAt: '2026-01-05T20:00:00Z' }), options),
+    (error) => error.field === 'claim-end' && /at least 24 hours/.test(error.message),
+  );
+  const ok = parseCampaignInput(scheduled({ claimEndsAt: '2026-01-06T00:15:00Z' }), options);
+  assert.equal(ok.claimEndsAt.toISOString(), '2026-01-06T00:15:00.000Z');
+});
+
 test('normalizeImageUrl only allows https and ipfs links', () => {
-  assert.equal(normalizeImageUrl('ipfs://bafy123/img.png'), 'ipfs://bafy123/img.png');
+  assert.equal(
+    normalizeImageUrl('ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa'),
+    'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa',
+  );
+  assert.equal(normalizeImageUrl('QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa/a.png'.split('/')[0]), 'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa');
   assert.equal(normalizeImageUrl('https://example.com/a.png'), 'https://example.com/a.png');
   assert.throws(() => normalizeImageUrl('javascript:alert(1)'));
   assert.equal(normalizeImageUrl(''), null);
@@ -285,12 +367,14 @@ function createClaimDb(campaign) {
         return structuredClone(doc);
       },
       async updateOne(filter, update) {
-        const doc = campaigns.find((item) => item._id === filter._id);
+        const doc = campaigns.find((item) => matches(item, filter));
+        if (!doc) return { matchedCount: 0 };
         set(doc, update.$set || {});
         for (const path of Object.keys(update.$unset || {})) {
           const [parent, key] = path.split('.');
           delete doc[parent][key];
         }
+        return { matchedCount: 1 };
       },
       async updateMany() {},
       find() {
@@ -311,6 +395,7 @@ function snapshotCampaign(overrides = {}) {
     _id: 'abcdefghjk',
     wallet: { address: 'addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8' },
     tokenY: { decimals: 0 },
+    lanes: { status: 'none', count: 0 },
     network: 'mainnet',
     filters: { minBalance: '0', excludeScripts: true, exclude: [] },
     distribution: { mode: 'fixed', amountPerHolder: '5' },
@@ -334,6 +419,7 @@ test('runSnapshot stores one entitlement per holder and drops the uploaded list'
   assert.equal(db.entitlements[0].status, 'unclaimed');
   assert.equal(db.campaigns[0].snapshot.status, 'taken');
   assert.equal(db.campaigns[0].snapshot.totalAmount, '10');
+  assert.equal(db.campaigns[0].lanes.count, 1);
   assert.equal(db.campaigns[0].snapshot.rows, undefined);
 
   const again = await runSnapshot(db, 'abcdefghjk', { now: new Date('2026-01-02T00:00:00Z') });
@@ -356,4 +442,44 @@ test('runDueSnapshots processes campaigns whose snapshot time has arrived', asyn
   const db = createClaimDb(snapshotCampaign());
   const results = await runDueSnapshots(db, { now: new Date('2026-01-02T00:00:00Z') });
   assert.deepEqual(results.map((item) => item.status), ['taken']);
+});
+
+test('a late snapshot moves the claim window and keeps its length', async () => {
+  const planned = new Date(Date.now() - 60 * 60 * 1000);
+  const db = createClaimDb(snapshotCampaign({
+    claimStartsAt: planned,
+    claimEndsAt: new Date(planned.getTime() + 48 * 60 * 60 * 1000),
+  }));
+  await runSnapshot(db, 'abcdefghjk', { now: new Date() });
+
+  const [campaign] = db.campaigns;
+  const opensIn = campaign.claimStartsAt.getTime() - Date.now();
+  assert.ok(opensIn > 14 * 60 * 1000 && opensIn <= 15 * 60 * 1000 + 1000);
+  assert.equal(campaign.claimEndsAt.getTime() - campaign.claimStartsAt.getTime(), 48 * 60 * 60 * 1000);
+});
+
+test('an on-time snapshot leaves the planned claim window alone', async () => {
+  const start = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const db = createClaimDb(snapshotCampaign({ claimStartsAt: start, claimEndsAt: new Date(start.getTime() + 36e5 * 30) }));
+  await runSnapshot(db, 'abcdefghjk', { now: new Date() });
+  assert.equal(db.campaigns[0].claimStartsAt.getTime(), start.getTime());
+});
+
+test('claims stay closed while the snapshot has failed, and the owner can rerun it', async () => {
+  const campaign = snapshotCampaign({ claimStartsAt: new Date('2026-01-01T00:15:00Z'), claimEndsAt: new Date('2026-01-03T00:00:00Z') });
+  campaign.snapshot.rows = [{ address: 'garbage', quantity: null }];
+  const db = createClaimDb(campaign);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) await runSnapshot(db, 'abcdefghjk', { now: new Date('2026-01-02T00:00:00Z') });
+  assert.equal(db.campaigns[0].snapshot.status, 'failed');
+  // Even though the planned close date has passed, nothing has opened or closed yet.
+  assert.equal(deriveStatus(db.campaigns[0], new Date('2026-02-01T00:00:00Z')).status, 'upcoming');
+
+  db.campaigns[0].snapshot.rows = [{ address: BASE_ADDRESS, quantity: null }];
+  const result = await retrySnapshot(db, 'abcdefghjk', { now: new Date('2026-02-01T00:00:00Z') });
+  assert.equal(result.status, 'taken');
+  assert.equal(db.campaigns[0].snapshot.attempts, 1);
+  assert.equal(db.campaigns[0].claimStartsAt.getTime() > Date.now() - 1000, true);
+
+  await assert.rejects(() => retrySnapshot(db, 'abcdefghjk'), /Only a failed snapshot/);
 });

@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/claim.css?v=1" />
+  <link rel="stylesheet" href="/claim.css?v=4" />
 </head>
 <body>
   <div data-site-navigation></div>
@@ -47,6 +47,7 @@
         <div id="claim-detail-view" hidden></div>
 
         <form id="claim-create-view" class="claim-form" hidden novalidate>
+          <p class="claim-message claim-form__status" id="form-status" role="alert" hidden></p>
           <fieldset class="claim-fieldset">
             <legend>1. Your wallet</legend>
             <p class="claim-help">
@@ -67,28 +68,13 @@
 
           <fieldset class="claim-fieldset">
             <legend>3. Token to give away</legend>
-            <div class="claim-row">
-              <div>
-                <label class="claim-label" for="y-policy">Policy ID</label>
-                <input id="y-policy" maxlength="56" placeholder="56-character policy ID" />
-              </div>
-              <div>
-                <label class="claim-label" for="y-name">Asset name</label>
-                <input id="y-name" maxlength="64" />
-                <label class="claim-check"><input type="checkbox" id="y-name-hex" /> Asset name is hex</label>
-              </div>
+            <label class="claim-label" for="y-policy">Policy ID</label>
+            <input id="y-policy" maxlength="56" autocomplete="off" placeholder="56-character policy ID" />
+            <div id="y-asset-choice" hidden>
+              <label class="claim-label" for="y-asset">This policy has several tokens. Which one?</label>
+              <select id="y-asset"></select>
             </div>
-            <button type="button" class="btn btn--outline btn--sm" id="y-lookup">Look up token</button>
-            <div class="claim-row">
-              <div>
-                <label class="claim-label" for="y-ticker">Ticker</label>
-                <input id="y-ticker" maxlength="12" />
-              </div>
-              <div>
-                <label class="claim-label" for="y-decimals">Decimals</label>
-                <input id="y-decimals" type="number" min="0" max="19" value="0" />
-              </div>
-            </div>
+            <div class="claim-token" id="y-details" aria-live="polite" hidden></div>
           </fieldset>
 
           <fieldset class="claim-fieldset">
@@ -99,19 +85,9 @@
             </div>
 
             <div id="source-koios">
-              <div class="claim-row">
-                <div>
-                  <label class="claim-label" for="x-policy">Holder token policy ID</label>
-                  <input id="x-policy" maxlength="56" placeholder="56-character policy ID" />
-                </div>
-                <div>
-                  <label class="claim-label" for="x-name">Asset name (optional)</label>
-                  <input id="x-name" maxlength="64" />
-                  <label class="claim-check"><input type="checkbox" id="x-name-hex" /> Asset name is hex</label>
-                </div>
-              </div>
-              <p class="claim-help">Leave the asset name empty to include every asset under the policy, such as an NFT collection.</p>
-              <button type="button" class="btn btn--outline btn--sm" id="x-lookup">Look up image</button>
+              <label class="claim-label" for="x-policy">Policy ID of the token holders must own</label>
+              <input id="x-policy" maxlength="56" autocomplete="off" placeholder="56-character policy ID" />
+              <div class="claim-token" id="x-details" aria-live="polite" hidden></div>
             </div>
 
             <div id="source-json" hidden>
@@ -127,8 +103,8 @@
 
             <div class="claim-row">
               <div>
-                <label class="claim-label" for="min-balance">Minimum balance to qualify</label>
-                <input id="min-balance" inputmode="numeric" placeholder="0" />
+                <label class="claim-label" for="min-balance" id="min-balance-label">Minimum balance to qualify</label>
+                <input id="min-balance" inputmode="decimal" autocomplete="off" placeholder="0" />
               </div>
               <div>
                 <label class="claim-check claim-check--block"><input type="checkbox" id="exclude-scripts" checked /> Skip script and contract addresses</label>
@@ -142,12 +118,12 @@
             <legend>5. How much each person gets</legend>
             <label class="claim-label" for="distribution-mode">Distribution</label>
             <select id="distribution-mode">
+              <option value="proportional" selected>Split a total by holder balance</option>
               <option value="fixed">Same amount for every holder</option>
-              <option value="proportional">Split a total by holder balance</option>
               <option value="manual">Amounts from the uploaded list</option>
             </select>
-            <label class="claim-label" for="distribution-amount" id="distribution-amount-label">Amount per holder</label>
-            <input id="distribution-amount" inputmode="decimal" />
+            <label class="claim-label" for="distribution-amount" id="distribution-amount-label">Total amount to split</label>
+            <input id="distribution-amount" inputmode="decimal" autocomplete="off" />
           </fieldset>
 
           <fieldset class="claim-fieldset">
@@ -162,17 +138,17 @@
                 <input id="claim-end" type="datetime-local" />
               </div>
             </div>
-            <p class="claim-help">After the close time no claims work, and you can reclaim the leftover tokens and ADA from the campaign wallet.</p>
+            <p class="claim-help">Claims open at least 15 minutes after the snapshot (leave it empty for exactly 15 minutes after) and stay open for at least 24 hours. After the close time no claims work, and you can reclaim the leftover tokens and ADA from the campaign wallet.</p>
           </fieldset>
 
           <fieldset class="claim-fieldset">
             <legend>7. Picture</legend>
+            <p class="claim-help">We look for the token artwork on chain (CIP-68, then CIP-25 mint metadata, then the token registry). Pick one, or paste your own link.</p>
             <div class="claim-images" id="image-choices"></div>
             <label class="claim-label" for="image-url">Or paste an image URL (https:// or ipfs://)</label>
             <input id="image-url" maxlength="500" />
           </fieldset>
 
-          <p class="claim-message claim-message--error" id="form-error" role="alert" hidden></p>
           <button type="submit" class="btn btn--primary" id="form-submit">Create campaign</button>
         </form>
       </div>
@@ -180,7 +156,7 @@
   </main>
 
   <script src="/navigation.js?v=3"></script>
-  <script src="/claim.js?v=1"></script>
+  <script src="/claim.js?v=5"></script>
   <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

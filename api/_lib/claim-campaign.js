@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { addressBelongsToStake } from './cardano-address.js';
 import { generateClaimWallet } from './claim-wallet.js';
+import { laneCountFor } from './claim-funding.js';
 import {
   SnapshotError,
   buildEntitlements,
@@ -8,19 +9,31 @@ import {
   parseHolderJson,
   parseTokenAmount,
 } from './claim-snapshot.js';
+import { TokenInfoError, imageSourcesFor, normalizeImageRef } from './token-info.js';
 
 export const CAMPAIGNS_COLLECTION = 'claim_campaigns';
 export const WALLETS_COLLECTION = 'claim_wallets';
 export const ENTITLEMENTS_COLLECTION = 'claim_entitlements';
+export const LANES_COLLECTION = 'claim_lanes';
 
 export const PUBLIC_LIST_LIMIT = 12;
 const MAX_OPEN_CAMPAIGNS_PER_OWNER = 5;
 const MAX_SNAPSHOT_ATTEMPTS = 3;
 const STALE_SNAPSHOT_MS = 10 * 60 * 1000;
+export const MIN_CLAIM_DELAY_MS = 15 * 60 * 1000;
+export const MIN_CLAIM_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Form times only have minute precision, so allow a little slack against the exact minimums.
+const TIMING_TOLERANCE_MS = 60 * 1000;
 const MAX_FUTURE_MS = 366 * 24 * 60 * 60 * 1000;
 const ID_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
-export class ClaimInputError extends Error {}
+/** A problem with the creator's input. `field` names the form control to highlight. */
+export class ClaimInputError extends Error {
+  constructor(message, field = null) {
+    super(message);
+    this.field = field;
+  }
+}
 
 export function getClaimNetwork() {
   return process.env.CLAIM_NETWORK === 'preprod' ? 'preprod' : 'mainnet';
@@ -39,6 +52,7 @@ export async function ensureClaimIndexes(db) {
       db.collection(CAMPAIGNS_COLLECTION).createIndex({ 'owner.stake': 1 }),
       db.collection(CAMPAIGNS_COLLECTION).createIndex({ 'snapshot.status': 1, 'snapshot.scheduledFor': 1 }),
       db.collection(ENTITLEMENTS_COLLECTION).createIndex({ campaignId: 1, key: 1 }, { unique: true }),
+      db.collection(LANES_COLLECTION).createIndex({ campaignId: 1, index: 1 }, { unique: true }),
     ]);
     globalThis.__preebClaimIndexesReady = true;
   } catch (error) {
@@ -46,76 +60,81 @@ export async function ensureClaimIndexes(db) {
   }
 }
 
-function text(value, fieldName, { min = 0, max }) {
+function text(value, label, field, { min = 0, max }) {
   const result = String(value ?? '').trim();
-  if (result.length < min) throw new ClaimInputError(`${fieldName} is required.`);
-  if (result.length > max) throw new ClaimInputError(`${fieldName} must be at most ${max} characters.`);
+  if (result.length < min) throw new ClaimInputError(`${label} is required.`, field);
+  if (result.length > max) throw new ClaimInputError(`${label} must be at most ${max} characters.`, field);
   return result;
 }
 
-function hex(value, fieldName, { exactLength, maxLength, allowEmpty = false }) {
+function hex(value, label, field, { exactLength, maxLength, allowEmpty = false }) {
   const result = String(value ?? '').trim().toLowerCase();
   if (allowEmpty && result === '') return '';
   const lengthOk = exactLength ? result.length === exactLength : result.length <= maxLength && result.length % 2 === 0;
   if (!/^[0-9a-f]*$/.test(result) || !lengthOk || result === '') {
-    throw new ClaimInputError(`${fieldName} is not valid.`);
+    throw new ClaimInputError(
+      exactLength ? `${label} must be ${exactLength} hex characters.` : `${label} must be a valid hex value.`,
+      field,
+    );
   }
   return result;
 }
 
-function date(value, fieldName, now) {
+function date(value, label, field, now) {
   if (value === undefined || value === null || value === '') return null;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) throw new ClaimInputError(`${fieldName} is not a valid date.`);
+  if (Number.isNaN(parsed.getTime())) throw new ClaimInputError(`${label} is not a valid date.`, field);
   if (parsed.getTime() > now.getTime() + MAX_FUTURE_MS) {
-    throw new ClaimInputError(`${fieldName} must be within a year from now.`);
+    throw new ClaimInputError(`${label} must be within a year from now.`, field);
   }
   return parsed;
 }
 
 export function normalizeImageUrl(value) {
-  const url = String(value ?? '').trim();
-  if (!url) return null;
-  if (url.length > 500) throw new ClaimInputError('The image URL is too long.');
-  if (url.startsWith('ipfs://')) {
-    const path = url.slice('ipfs://'.length).replace(/^ipfs\//, '');
-    if (!/^[A-Za-z0-9._\-/]+$/.test(path)) throw new ClaimInputError('The IPFS image link is not valid.');
-    return `ipfs://${path}`;
-  }
-  let parsed;
   try {
-    parsed = new URL(url);
-  } catch {
-    throw new ClaimInputError('The image URL is not valid.');
+    return normalizeImageRef(value);
+  } catch (error) {
+    if (error instanceof TokenInfoError) throw new ClaimInputError(error.message, 'image');
+    throw error;
   }
-  if (parsed.protocol !== 'https:') throw new ClaimInputError('Image URLs must start with https:// or ipfs://.');
-  return parsed.toString();
 }
 
-export function resolveImageUrl(value) {
-  if (!value) return null;
-  return value.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${value.slice('ipfs://'.length)}` : value;
+const formatWhen = (value) => value.toISOString().replace('T', ' ').replace(/:\d\d\.\d+Z$/, ' UTC');
+
+/** Validates the token the creator wants to give away, before it is looked up on chain. */
+export function parseTokenReference(token, field = 'y-policy') {
+  const policyId = hex(token?.policyId, 'The policy ID', field, { exactLength: 56 });
+  // The asset name is only sent when a policy holds several tokens and the user picked one.
+  const picked = token?.assetNameHex;
+  const assetNameHex = picked === undefined || picked === null
+    ? null
+    : hex(picked, 'The token', 'y-asset', { maxLength: 64, allowEmpty: true });
+  return { policyId, assetNameHex };
 }
 
-/** Validates the creation request and turns it into a campaign document (minus wallet fields). */
-export function parseCampaignInput(body, { ownerStake, now = new Date(), network = getClaimNetwork() } = {}) {
+/**
+ * Validates the creation request and turns it into a campaign document (minus
+ * wallet fields). Token decimals, ticker and artwork come from `tokenInfo`, which
+ * the server read from the chain; anything the client sends for them is ignored.
+ */
+export function parseCampaignInput(body, { ownerStake, tokenInfo, holderToken = null, now = new Date(), network = getClaimNetwork() } = {}) {
   if (!body || typeof body !== 'object') throw new ClaimInputError('Request body is required.');
+  if (!tokenInfo) throw new ClaimInputError('The token could not be read from the chain.', 'y-policy');
 
-  const decimals = Number(body.tokenY?.decimals ?? 0);
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 19) {
-    throw new ClaimInputError('Token decimals must be between 0 and 19.');
-  }
-
+  const decimals = tokenInfo.decimals;
   const tokenY = {
-    policyId: hex(body.tokenY?.policyId, 'Token policy ID', { exactLength: 56 }),
-    assetNameHex: hex(body.tokenY?.assetNameHex, 'Token asset name', { maxLength: 64, allowEmpty: true }),
+    policyId: tokenInfo.policyId,
+    assetNameHex: tokenInfo.assetNameHex,
     decimals,
-    ticker: text(body.tokenY?.ticker, 'Ticker', { max: 12 }),
+    decimalsSource: tokenInfo.decimalsSource,
+    ticker: tokenInfo.ticker,
+    name: tokenInfo.name,
+    website: tokenInfo.website || null,
   };
 
   const mode = body.distribution?.mode;
   if (!['fixed', 'proportional', 'manual'].includes(mode)) {
-    throw new ClaimInputError('Distribution mode must be fixed, proportional or manual.');
+    throw new ClaimInputError('Choose how each person\'s amount is decided.', 'distribution-mode');
   }
   const distribution = { mode };
   try {
@@ -129,45 +148,71 @@ export function parseCampaignInput(body, { ownerStake, now = new Date(), network
       distribution.totalAmount = amount.toString();
     }
   } catch (error) {
-    if (error instanceof SnapshotError) throw new ClaimInputError(error.message);
+    if (error instanceof SnapshotError) throw new ClaimInputError(error.message, 'distribution-amount');
     throw error;
   }
 
   const source = body.snapshot?.source;
   if (source !== 'koios' && source !== 'json') {
-    throw new ClaimInputError('Snapshot source must be koios or json.');
+    throw new ClaimInputError('Choose where the list of eligible holders comes from.', 'source');
   }
   if (source === 'json' && !Array.isArray(body.snapshot.holders) && typeof body.snapshot.holders !== 'string') {
-    throw new ClaimInputError('A holder list is required.');
+    throw new ClaimInputError('Upload or paste the holder list.', 'holder-json');
+  }
+  if (source === 'json' && !String(Array.isArray(body.snapshot.holders) ? body.snapshot.holders.length : body.snapshot.holders).trim()) {
+    throw new ClaimInputError('Upload or paste the holder list.', 'holder-json');
   }
   if (source === 'koios' && mode === 'manual') {
-    throw new ClaimInputError('Manual amounts need an uploaded holder list.');
+    throw new ClaimInputError('Amounts from a list need an uploaded holder list.', 'distribution-mode');
   }
 
   const snapshot = { source };
   let tokenX = null;
   if (source === 'koios') {
+    if (!holderToken) throw new ClaimInputError('The holder token could not be read from the chain.', 'x-policy');
     tokenX = {
-      policyId: hex(body.tokenX?.policyId, 'Token X policy ID', { exactLength: 56 }),
-      assetNameHex: hex(body.tokenX?.assetNameHex, 'Token X asset name', { maxLength: 64, allowEmpty: true }),
+      policyId: holderToken.policyId,
+      name: holderToken.name,
+      ticker: holderToken.ticker,
+      website: holderToken.website || null,
+      decimals: holderToken.decimals,
+      multiAsset: Boolean(holderToken.multiAsset),
     };
   }
-  const scheduledFor = date(body.snapshot.at, 'Snapshot date', now);
-  snapshot.scheduledFor = scheduledFor && scheduledFor > now ? scheduledFor : now;
+  const scheduledFor = date(body.snapshot.at, 'The snapshot time', 'snapshot-at', now);
+  const snapshotIsImmediate = !scheduledFor || scheduledFor <= now;
+  snapshot.scheduledFor = snapshotIsImmediate ? now : scheduledFor;
 
-  const claimStartsAt = date(body.claimStartsAt, 'Claim start', now);
-  const claimEndsAt = date(body.claimEndsAt, 'Claim end', now);
-  const earliestClaim = claimStartsAt || snapshot.scheduledFor;
-  if (claimEndsAt && claimEndsAt <= earliestClaim) {
-    throw new ClaimInputError('The claim period must end after the snapshot and claim start.');
+  const requestedStart = date(body.claimStartsAt, 'The claim start', 'claim-start', now);
+  const claimEndsAt = date(body.claimEndsAt, 'The claim end', 'claim-end', now);
+
+  // Holders get a quiet gap after the snapshot, and a minimum window to actually claim.
+  const earliestStart = new Date(snapshot.scheduledFor.getTime() + MIN_CLAIM_DELAY_MS);
+  if (requestedStart && requestedStart.getTime() < earliestStart.getTime() - TIMING_TOLERANCE_MS) {
+    throw new ClaimInputError(
+      `Claims must open at least 15 minutes after the snapshot. The earliest is ${formatWhen(earliestStart)}, or leave it empty to use that.`,
+      'claim-start',
+    );
   }
-  if (claimStartsAt && claimStartsAt < snapshot.scheduledFor) {
-    throw new ClaimInputError('Claims cannot start before the snapshot is taken.');
+  const claimStartsAt = requestedStart && requestedStart > earliestStart ? requestedStart : earliestStart;
+
+  if (claimEndsAt && claimEndsAt.getTime() < claimStartsAt.getTime() + MIN_CLAIM_WINDOW_MS - TIMING_TOLERANCE_MS) {
+    throw new ClaimInputError(
+      `Claims must stay open for at least 24 hours. With claims opening ${formatWhen(claimStartsAt)}, the earliest close is ${formatWhen(new Date(claimStartsAt.getTime() + MIN_CLAIM_WINDOW_MS))}.`,
+      'claim-end',
+    );
   }
 
-  const minBalanceText = String(body.filters?.minBalance ?? '').trim();
-  if (minBalanceText && !/^\d+$/.test(minBalanceText)) {
-    throw new ClaimInputError('Minimum balance must be a whole number.');
+  // The creator types a balance in whole tokens; the chain counts the smallest unit.
+  const minBalanceText = String(body.filters?.minBalance ?? '').replace(/,/g, '').trim();
+  let minBalance = 0n;
+  if (minBalanceText) {
+    try {
+      minBalance = parseTokenAmount(minBalanceText, tokenX?.decimals ?? 0, 'The minimum balance');
+    } catch (error) {
+      if (error instanceof SnapshotError) throw new ClaimInputError(error.message, 'min-balance');
+      throw error;
+    }
   }
   const exclude = Array.isArray(body.filters?.exclude)
     ? body.filters.exclude.map((item) => String(item).trim()).filter(Boolean).slice(0, 500)
@@ -175,21 +220,19 @@ export function parseCampaignInput(body, { ownerStake, now = new Date(), network
 
   const payoutAddress = String(body.payoutAddress ?? '').trim();
   if (!addressBelongsToStake(payoutAddress, ownerStake)) {
-    throw new ClaimInputError('The reclaim address must be an address of your connected wallet.');
+    throw new ClaimInputError('The reclaim address must be an address of your connected wallet.', 'wallet');
   }
   const payoutNetwork = payoutAddress.startsWith('addr_test') ? 'preprod' : 'mainnet';
   if (payoutNetwork !== network) {
-    throw new ClaimInputError(`The reclaim address must be a ${network} address.`);
+    throw new ClaimInputError(`This site is running on ${network}, so the reclaim address must be a ${network} address.`, 'wallet');
   }
 
-  let image = null;
-  if (body.image?.url) {
-    image = normalizeImageUrl(body.image.url);
-  }
+  // Without an explicit choice, fall back to the token's own artwork.
+  const image = body.image?.url ? normalizeImageUrl(body.image.url) : tokenInfo.images?.[0]?.ref || null;
 
   return {
-    title: text(body.title, 'Title', { min: 3, max: 80 }),
-    description: text(body.description, 'Description', { max: 1000 }),
+    title: text(body.title, 'The title', 'f-title', { min: 3, max: 80 }),
+    description: text(body.description, 'The description', 'f-description', { max: 1000 }),
     image,
     network,
     owner: { stake: ownerStake, payoutAddress },
@@ -197,7 +240,7 @@ export function parseCampaignInput(body, { ownerStake, now = new Date(), network
     tokenY,
     distribution,
     filters: {
-      minBalance: minBalanceText || '0',
+      minBalance: minBalance.toString(),
       excludeScripts: body.filters?.excludeScripts !== false,
       exclude,
     },
@@ -221,8 +264,14 @@ export async function createCampaign(db, input, { now = new Date() } = {}) {
   }
 
   // Parse the holder list up front so a bad upload fails before any wallet exists.
-  const rows = input.holders ? parseHolderJson(input.holders) : null;
-  if (rows && rows.length > 25_000) throw new ClaimInputError('The holder list is too large.');
+  let rows = null;
+  try {
+    rows = input.holders ? parseHolderJson(input.holders) : null;
+  } catch (error) {
+    if (error instanceof SnapshotError) throw new ClaimInputError(error.message, 'holder-json');
+    throw error;
+  }
+  if (rows && rows.length > 25_000) throw new ClaimInputError('The holder list is too large (25,000 addresses at most).', 'holder-json');
 
   const id = generateCampaignId();
   const wallet = generateClaimWallet(input.network, id);
@@ -239,6 +288,7 @@ export async function createCampaign(db, input, { now = new Date() } = {}) {
       error: null,
       ...(rows ? { rows } : {}),
     },
+    lanes: { status: 'none', count: 0 },
     createdAt: now,
     updatedAt: now,
   };
@@ -261,7 +311,9 @@ export async function createCampaign(db, input, { now = new Date() } = {}) {
 export function deriveStatus(campaign, now = new Date()) {
   const time = now.getTime();
   const endsAt = campaign.claimEndsAt ? new Date(campaign.claimEndsAt).getTime() : null;
-  if (campaign.reclaimedAt || (endsAt !== null && time >= endsAt)) {
+  // Until the snapshot succeeds the claim window has not really started, so it cannot have ended either.
+  const snapshotTaken = campaign.snapshot?.status === 'taken';
+  if (campaign.reclaimedAt || (snapshotTaken && endsAt !== null && time >= endsAt)) {
     return { status: 'closed', countdownTo: null };
   }
 
@@ -279,6 +331,14 @@ export function deriveStatus(campaign, now = new Date()) {
   return { status: 'active', countdownTo: endsAt === null ? null : new Date(endsAt).toISOString() };
 }
 
+/** What an open campaign is waiting on: funding, lane preparation, or nothing (claims are live). */
+export function derivePhase(campaign, status) {
+  if (status !== 'active') return status;
+  if (campaign.lanes?.status === 'ready') return 'claiming';
+  if (campaign.lanes?.status === 'preparing' || campaign.lanes?.status === 'submitted') return 'preparing';
+  return campaign.funding?.status === 'funded' ? 'ready-to-prepare' : 'awaiting-funding';
+}
+
 export function toPublicCampaign(campaign, now = new Date(), { viewerStakes = [] } = {}) {
   const { status, countdownTo } = deriveStatus(campaign, now);
   const snapshot = campaign.snapshot || {};
@@ -288,10 +348,16 @@ export function toPublicCampaign(campaign, now = new Date(), { viewerStakes = []
     id: campaign._id,
     title: campaign.title,
     description: campaign.description,
-    imageUrl: resolveImageUrl(campaign.image),
+    imageUrl: imageSourcesFor(campaign.image)[0] || null,
+    imageSources: imageSourcesFor(campaign.image),
     network: campaign.network,
     status,
+    phase: derivePhase(campaign, status),
     countdownTo,
+    funding: campaign.funding
+      ? { ...campaign.funding, checkedAt: new Date(campaign.funding.checkedAt).toISOString() }
+      : null,
+    lanes: { status: campaign.lanes?.status || 'none', count: campaign.lanes?.count || 0 },
     owner: campaign.owner.stake,
     viewerIsOwner: viewerStakes.includes(campaign.owner.stake),
     tokenX: campaign.tokenX,
@@ -323,12 +389,14 @@ export async function listPublicCampaigns(db, now = new Date()) {
   return campaigns.map((campaign) => toPublicCampaign(campaign, now));
 }
 
-export async function getPublicCampaign(db, id, now = new Date(), viewerStakes = []) {
-  const campaign = await db.collection(CAMPAIGNS_COLLECTION).findOne(
+/** `refresh` lets the caller update chain-derived state (funding, lanes) before the campaign is described. */
+export async function getPublicCampaign(db, id, now = new Date(), viewerStakes = [], { refresh } = {}) {
+  let campaign = await db.collection(CAMPAIGNS_COLLECTION).findOne(
     { _id: id },
     { projection: { 'snapshot.rows': 0 } },
   );
   if (!campaign) return null;
+  if (refresh) campaign = await refresh(campaign);
 
   const totals = await db.collection(ENTITLEMENTS_COLLECTION).aggregate([
     { $match: { campaignId: id } },
@@ -401,16 +469,30 @@ export async function runSnapshot(db, campaignId, { now = new Date(), fetchImpl 
       );
     }
 
+    // A snapshot that ran late must not leave holders less than 15 minutes of notice;
+    // the whole claim window moves by the delay and keeps its length.
+    const takenAt = new Date();
+    const earliestStart = takenAt.getTime() + MIN_CLAIM_DELAY_MS;
+    const plannedStart = campaign.claimStartsAt ? new Date(campaign.claimStartsAt).getTime() : earliestStart;
+    const shift = Math.max(0, earliestStart - plannedStart);
+    const window = {};
+    if (shift > 0 || !campaign.claimStartsAt) {
+      window.claimStartsAt = new Date(plannedStart + shift);
+      if (campaign.claimEndsAt) window.claimEndsAt = new Date(new Date(campaign.claimEndsAt).getTime() + shift);
+    }
+
     await campaigns.updateOne({ _id: campaignId }, {
       $set: {
+        ...window,
         'snapshot.status': 'taken',
-        'snapshot.takenAt': new Date(),
+        'snapshot.takenAt': takenAt,
         'snapshot.error': null,
         'snapshot.eligibleCount': result.entitlements.length,
         'snapshot.holderCount': result.entitlements.length + Object.values(result.skipped).reduce((a, b) => a + b, 0),
         'snapshot.totalBalance': result.totalBalance,
         'snapshot.totalAmount': result.totalAmount,
         'snapshot.skipped': result.skipped,
+        'lanes.count': laneCountFor(result.entitlements.length),
         updatedAt: new Date(),
       },
       $unset: { 'snapshot.rows': '' },
@@ -431,6 +513,16 @@ export async function runSnapshot(db, campaignId, { now = new Date(), fetchImpl 
     });
     return { ran: true, status: retry ? 'scheduled' : 'failed', error: message };
   }
+}
+
+/** Lets the owner rerun a snapshot that exhausted its automatic retries. */
+export async function retrySnapshot(db, campaignId, { now = new Date(), fetchImpl } = {}) {
+  const reset = await db.collection(CAMPAIGNS_COLLECTION).updateOne(
+    { _id: campaignId, 'snapshot.status': 'failed' },
+    { $set: { 'snapshot.status': 'scheduled', 'snapshot.scheduledFor': now, 'snapshot.attempts': 0, 'snapshot.error': null } },
+  );
+  if (!reset.matchedCount) throw new ClaimInputError('Only a failed snapshot can be rerun.');
+  return runSnapshot(db, campaignId, { now, fetchImpl });
 }
 
 export async function runDueSnapshots(db, { now = new Date(), fetchImpl = fetch, limit = 5 } = {}) {

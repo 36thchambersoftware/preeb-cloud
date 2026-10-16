@@ -91,39 +91,66 @@ phase because the current code does not call Discord's bot API.
 A claim campaign lets token X holders claim token Y from a per-campaign wallet,
 instead of the project paying minimum ADA for every recipient. This section
 covers what exists so far: the `/claim` pages, campaigns, encrypted funding
-wallets, and snapshots. Funding checks, the claim transaction and the owner
-reclaim sweep are still to come.
+wallets, snapshots, funding checks and claim lanes. The claim transaction and the
+owner reclaim sweep are still to come.
 
 - **Pages:** `/claim` lists the 12 most recent campaigns (open first, upcoming
   ones with a live countdown, closed ones greyed out), `/claim/new` creates one,
   and `/claim/<id>` is the shareable page for a single campaign.
 - **API:** `GET/POST /api/claim/campaigns`, `GET /api/claim/<id>`,
-  `GET /api/claim/token-info`, and `POST /api/claim/run-snapshots` (cron only).
+  `POST /api/claim/<id>/prepare` (owner only), `GET /api/claim/token-info`, and
+  `POST /api/claim/run-snapshots` (cron only).
+- **Token details come from the chain:** the server looks up the token when a
+  campaign is created and ignores any decimals or ticker sent by the browser.
+  Decimals come from the CIP-68 datum, then the Cardano Token Registry, and are
+  0 when neither publishes any. Artwork is offered in the order CIP-68, CIP-25
+  mint metadata, then the registry logo (served through
+  `/api/claim/token-image`, raster formats only). `ipfs://` links are tried
+  against several gateways, and `ar://` and bare CIDs are understood. If the
+  creator picks nothing, the first artwork found is used.
+- **Funding:** after the snapshot the owner sends the total token amount plus a
+  small ADA deposit (about 2 ADA per lane, refundable) to the campaign wallet.
+  Viewing a campaign re-reads the wallet from Koios (cached for 30 seconds).
+- **Lanes:** one claim spends and recreates a wallet UTxO, so a single UTxO would
+  allow one claim at a time. "Prepare claims" splits the wallet in one
+  transaction into up to 20 lanes, each holding exactly what its claimants are
+  owed. A claimant's lane is a hash of their snapshot key. The campaign is
+  ready once that transaction is confirmed.
 
 - **Funding wallet:** each campaign gets its own enterprise wallet. Its seed is
   stored in `claim_wallets`, encrypted with AES-256-GCM using
   `CLAIM_WALLET_KEY_SECRET` (32+ characters, server-only) and bound to the
   campaign id. Losing that secret means losing access to every campaign wallet,
   so keep a backup of it.
-- **Snapshot:** taken from Koios (a policy or one asset) or from an uploaded
+- **Snapshot:** taken from Koios (every token under a policy ID) or from an uploaded
   holder list. Holders are grouped by stake address, script addresses are
   skipped, and each person's amount is stored (`fixed`, `proportional` or
   `manual`) in `claim_entitlements`. Koios only serves current balances, so a
   scheduled snapshot reflects the chain when it actually runs.
-- **Scheduled snapshots:** `.github/workflows/claim-snapshots.yml` calls
-  `POST /api/claim/run-snapshots` every 5 minutes (GitHub's schedule is
-  best-effort and can lag by several minutes). Add the same value as a GitHub
-  repository secret named `CLAIM_CRON_SECRET` and as a Vercel environment
-  variable; the endpoint rejects requests without it.
+- **Claim timing:** claims open at least 15 minutes after the snapshot (empty
+  means exactly 15 minutes after) and stay open for at least 24 hours. If a
+  snapshot runs late, the whole claim window moves by the delay and keeps its
+  length. Until the snapshot succeeds, claims stay closed.
+- **Scheduled snapshots:** `POST /api/claim/run-snapshots` (protected by
+  `CLAIM_CRON_SECRET` as a bearer token) takes every snapshot that is due. It
+  needs a scheduler that actually fires every minute or two: GitHub's scheduled
+  workflows (`.github/workflows/claim-snapshots.yml`) are best-effort and in
+  practice run every few hours, so use an external cron service such as
+  cron-job.org as the primary trigger and keep the workflow as a backstop.
+  Anyone viewing a campaign page also nudges a due snapshot along; taking it is
+  atomic, so it can never run twice.
+- **Failed snapshots:** a failed snapshot is retried automatically three times,
+  then marked failed. The owner gets a **Retry snapshot** button on the campaign
+  page (`POST /api/claim/<id>/snapshot`).
 - **Owner:** creating a campaign requires a wallet verified in this browser
   (the signed wallet-session cookie). The reclaim address must be a base
   address of that same wallet.
 - **Environment:** `CLAIM_WALLET_KEY_SECRET`, `CLAIM_CRON_SECRET` (both 32+
   characters) and optionally `CLAIM_NETWORK=preprod` (default `mainnet`).
 - **MongoDB access:** the database user needs read/write and index access on
-  `claim_campaigns`, `claim_wallets` and `claim_entitlements`.
+  `claim_campaigns`, `claim_wallets`, `claim_entitlements` and `claim_lanes`.
 
-Run the tests with `node --test tests/claim.test.js`.
+Run the tests with `node --test tests/claim.test.js tests/claim-funding.test.js`.
 
 ## Airdrop transaction funding
 
