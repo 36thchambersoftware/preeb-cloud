@@ -92,14 +92,16 @@ export async function refreshFunding(db, campaign, { now = new Date(), force = f
       await settleClaims(db, campaign._id, { now, fetchImpl });
       changed = true;
     }
+    let reclaimSettled = null;
     if (campaign.reclaim?.status === 'submitted') {
-      await settleReclaim(db, campaign, { now, fetchImpl });
+      reclaimSettled = await settleReclaim(db, campaign, { now, fetchImpl });
       changed = true;
     }
 
     const checkedAt = campaign.funding?.checkedAt ? new Date(campaign.funding.checkedAt).getTime() : 0;
     let stored = campaign.funding;
-    if (force || now.getTime() - checkedAt >= FUNDING_CACHE_MS) {
+    // A reclaim that just landed changes the wallet's balance, so the cached balance is not trusted then.
+    if (force || reclaimSettled === 'confirmed' || now.getTime() - checkedAt >= FUNDING_CACHE_MS) {
       const settled = await settleLanes(db, campaign, now, fetchImpl);
       if (settled === 'ready') await settleClaims(db, campaign._id, { now, fetchImpl });
       const { funding } = await readFunding(campaign, fetchImpl);

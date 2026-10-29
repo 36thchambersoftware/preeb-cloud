@@ -111,6 +111,10 @@ export async function reclaimFunds(db, campaignId, { now = new Date(), fetchImpl
   const eligibility = reclaimEligibility(campaign, now, await countInFlightClaims(db, campaign));
   if (!eligibility.allowed) throw new ClaimInputError(eligibility.reason);
 
+  // An empty wallet is reported without touching any state, so a finished reclaim stays finished.
+  const utxos = await fetchAddressUtxos(campaign.wallet.address, campaign.network, fetchImpl);
+  if (utxos.length === 0) throw new ClaimInputError('The campaign wallet is empty, so there is nothing to reclaim.');
+
   // One sweep at a time; a stuck one is released after a while.
   const claimed = await campaigns.findOneAndUpdate(
     {
@@ -132,12 +136,6 @@ export async function reclaimFunds(db, campaignId, { now = new Date(), fetchImpl
 
   let submitted = false;
   try {
-    const utxos = await fetchAddressUtxos(campaign.wallet.address, campaign.network, fetchImpl);
-    if (utxos.length === 0) {
-      await fail('The campaign wallet is empty.');
-      throw new ClaimInputError('The campaign wallet is empty, so there is nothing to reclaim.');
-    }
-
     const [csl, protocol, wallet] = await Promise.all([
       loadCsl(),
       fetchProtocolParams(campaign.network, fetchImpl),

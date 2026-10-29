@@ -361,37 +361,50 @@
   function appendReclaim(owner, campaign) {
     const section = el('div', 'claim-reclaim');
     section.appendChild(el('h4', null, 'Reclaim funds'));
-    const payout = campaign.payoutAddress ? shorten(campaign.payoutAddress, 14, 10) : 'your wallet';
-    section.appendChild(el('p', null, `Everything in the campaign wallet (tokens and ADA) goes back to ${payout}, the address you created this campaign with. It can never go anywhere else.`));
 
     const reclaim = campaign.reclaim;
-    if (reclaim?.status === 'submitted' && reclaim.txHash) {
+    const txLink = () => {
       const link = el('a', null, 'View transaction');
       link.href = explorerTx(campaign, reclaim.txHash);
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
-      section.appendChild(el('p', null, 'Reclaim submitted and waiting for confirmation. '));
-      section.lastChild.appendChild(link);
-    } else if (reclaim?.status === 'confirmed' && campaign.reclaimed) {
-      section.appendChild(el('p', 'claim-success', 'Funds returned to you. If anything is sent to the campaign wallet later, you can reclaim again.'));
-    }
+      return link;
+    };
 
-    const eligibility = campaign.reclaimEligibility;
-    if (eligibility?.allowed && reclaim?.status !== 'submitted') {
-      const button = el('button', 'btn btn--primary', 'Reclaim funds');
-      button.type = 'button';
-      button.addEventListener('click', () => ownerAction('reclaim', campaign, button, 'Sending…', 'Reclaim funds'));
-      section.appendChild(button);
-    } else if (eligibility && !eligibility.allowed) {
-      section.appendChild(el('p', 'claim-warning', eligibility.reason));
-      if (eligibility.canEndAt && new Date(eligibility.canEndAt) <= new Date()) {
-        const end = el('button', 'btn btn--outline', 'End claims now');
-        end.type = 'button';
-        end.addEventListener('click', () => ownerAction('end-claims', campaign, end, 'Ending…', 'End claims now'));
-        section.appendChild(end);
+    // The wallet is only known to be empty once its balance has been read; any UTxO holds ADA.
+    const walletEmpty = campaign.funding ? BigInt(campaign.funding.lovelaceHeld) === 0n : false;
+    const payout = campaign.payoutAddress ? shorten(campaign.payoutAddress, 14, 10) : 'your wallet';
+
+    if (reclaim?.status === 'submitted' && reclaim.txHash) {
+      const note = el('p', null, 'Reclaim submitted and waiting for confirmation. ');
+      note.appendChild(txLink());
+      section.appendChild(note);
+    } else if (walletEmpty && campaign.reclaimed) {
+      const note = el('p', 'claim-success', `All funds have been returned to ${payout}. `);
+      if (reclaim?.txHash) note.appendChild(txLink());
+      section.appendChild(note);
+      section.appendChild(el('p', 'claim-card__meta', 'If anything is sent to the campaign wallet later, a Reclaim button will appear here again.'));
+    } else if (walletEmpty) {
+      section.appendChild(el('p', 'claim-card__meta', 'The campaign wallet is empty, so there is nothing to reclaim.'));
+    } else {
+      section.appendChild(el('p', null, `Everything in the campaign wallet (tokens and ADA) goes back to ${payout}, the address you created this campaign with. It can never go anywhere else.`));
+      const eligibility = campaign.reclaimEligibility;
+      if (eligibility?.allowed) {
+        const button = el('button', 'btn btn--primary', 'Reclaim funds');
+        button.type = 'button';
+        button.addEventListener('click', () => ownerAction('reclaim', campaign, button, 'Sending…', 'Reclaim funds'));
+        section.appendChild(button);
+      } else if (eligibility) {
+        section.appendChild(el('p', 'claim-warning', eligibility.reason));
+        if (eligibility.canEndAt && new Date(eligibility.canEndAt) <= new Date()) {
+          const end = el('button', 'btn btn--outline', 'End claims now');
+          end.type = 'button';
+          end.addEventListener('click', () => ownerAction('end-claims', campaign, end, 'Ending…', 'End claims now'));
+          section.appendChild(end);
+        }
       }
     }
-    if (reclaim?.error) section.appendChild(el('p', 'claim-warning', reclaim.error));
+    if (reclaim?.error && !walletEmpty && reclaim.status !== 'confirmed') section.appendChild(el('p', 'claim-warning', reclaim.error));
     owner.appendChild(section);
   }
 
