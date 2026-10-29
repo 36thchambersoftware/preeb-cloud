@@ -2,7 +2,17 @@ import { koiosBase } from './claim-snapshot.js';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
-export class ChainError extends Error {}
+export class ChainError extends Error {
+  constructor(message, status = null) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** The node looked at the transaction and said no (as opposed to a timeout or outage). */
+export function isDefinitiveRejection(error) {
+  return error instanceof ChainError && error.status !== null && error.status >= 400 && error.status < 500 && error.status !== 429;
+}
 
 async function koios(network, path, { method = 'GET', body, contentType = 'application/json', fetchImpl = fetch } = {}) {
   let response;
@@ -19,7 +29,7 @@ async function koios(network, path, { method = 'GET', body, contentType = 'appli
 
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 300);
-    throw new ChainError(`Koios responded with HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+    throw new ChainError(`Koios responded with HTTP ${response.status}${detail ? `: ${detail}` : ''}`, response.status);
   }
   return response.json();
 }

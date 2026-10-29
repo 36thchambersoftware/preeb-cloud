@@ -12,6 +12,7 @@ import {
   fetchProtocolParams,
   fetchTipSlot,
   fetchUtxoInfo,
+  isDefinitiveRejection,
   submitTransaction,
 } from './cardano-chain.js';
 import {
@@ -134,6 +135,44 @@ export async function countInFlightClaims(db, campaign) {
   return db.collection(CLAIMS_COLLECTION).countDocuments({ campaignId: campaign._id, status: { $in: IN_FLIGHT } });
 }
 
+const MAX_UTXO_CANDIDATES = 40;
+
+/**
+ * Wallets sometimes report UTxOs that were already spent. Spending one makes the
+ * network reject the whole claim, so only UTxOs the chain still shows as unspent
+ * are offered to the builder.
+ */
+async function keepUnspent(csl, utxoHexes, network, fetchImpl) {
+  const candidates = utxoHexes
+    .map((hex) => {
+      try {
+        const utxo = csl.TransactionUnspentOutput.from_hex(hex);
+        const input = utxo.input();
+        return {
+          hex,
+          ref: `${Buffer.from(input.transaction_id().to_bytes()).toString('hex')}#${input.index()}`,
+          lovelace: BigInt(utxo.output().amount().coin().to_str()),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.lovelace > b.lovelace ? -1 : 1))
+    .slice(0, MAX_UTXO_CANDIDATES);
+
+  const live = new Set((await fetchUtxoInfo(candidates.map((candidate) => candidate.ref), network, fetchImpl))
+    .map((row) => `${row.tx_hash}#${row.tx_index}`));
+  return candidates.filter((candidate) => live.has(candidate.ref)).map((candidate) => candidate.hex);
+}
+
+function describeRejection(message) {
+  if (/BadInputsUTxO/.test(message)) return 'Your wallet\'s list of funds was out of date, so the network refused the transaction. Nothing was spent. Please try again.';
+  if (/FeeTooSmall|ValueNotConserved/.test(message)) return 'The network refused the transaction because of its fee. Nothing was spent. Please try again.';
+  if (/OutsideValidityInterval/.test(message)) return 'The claim took too long and expired. Nothing was spent. Please try again.';
+  return 'The network did not accept the transaction. Nothing was spent. Please try again.';
+}
+
 /**
  * Reserves the claimer's entitlement and lane, then builds the claim transaction
  * (already signed by the campaign wallet) for the claimer's wallet to sign.
@@ -154,6 +193,11 @@ export async function startClaim(db, campaign, { stake, claimerAddress, utxoHexe
   }
 
   await settleClaims(db, campaign._id, { now, fetchImpl });
+
+  // A claim this wallet started but never signed holds nothing the wallet could still use
+  // (only the wallet's own signature completes it), so starting again replaces it.
+  const abandoned = await db.collection(CLAIMS_COLLECTION).findOne({ campaignId: campaign._id, key: stake, status: 'reserved' });
+  if (abandoned) await releaseReservation(db, abandoned);
 
   const reservationId = crypto.randomUUID();
   const entitlements = db.collection(ENTITLEMENTS_COLLECTION);
@@ -193,6 +237,10 @@ export async function startClaim(db, campaign, { stake, claimerAddress, utxoHexe
       fetchTipSlot(campaign.network, fetchImpl),
       db.collection(WALLETS_COLLECTION).findOne({ _id: campaign._id }),
     ]);
+    const spendable = await keepUnspent(csl, utxoHexes, campaign.network, fetchImpl);
+    if (spendable.length === 0) {
+      throw new ClaimInputError('Your wallet\'s funds could not be confirmed on chain yet. Wait a minute and try again.');
+    }
 
     const amount = BigInt(entitlement.amount);
     const ttl = tip + CLAIM_TTL_SLOTS;
@@ -204,7 +252,7 @@ export async function startClaim(db, campaign, { stake, claimerAddress, utxoHexe
         campaignAddress: campaign.wallet.address,
         lane: laneUtxo,
         claimerAddress,
-        claimerUtxoHexes: utxoHexes,
+        claimerUtxoHexes: spendable,
         tokenY: campaign.tokenY,
         amount,
         ttl,
@@ -285,8 +333,14 @@ export async function finishClaim(db, campaign, { reservationId, stake, witnessS
       await submitTransaction(Buffer.from(signed.to_bytes()), claim.network, fetchImpl);
     } catch (error) {
       console.error('[PREEB] Claim submission was rejected:', error);
-      await claims.updateOne({ _id: claim._id }, { $set: { status: 'reserved', lastError: String(error.message).slice(0, 300) } });
-      throw new ClaimInputError('The network did not accept the transaction. Check your wallet has enough ADA and try again.');
+      await claims.updateOne({ _id: claim._id }, { $set: { lastError: String(error.message).slice(0, 300) } });
+      if (isDefinitiveRejection(error)) {
+        // The transaction body cannot change, so it can never be accepted: free the lane and entitlement now.
+        await releaseReservation(db, claim);
+        throw new ClaimInputError(describeRejection(String(error.message)));
+      }
+      await claims.updateOne({ _id: claim._id }, { $set: { status: 'reserved' } });
+      throw new ClaimInputError('The network is not responding right now. Please try again in a moment.');
     }
 
     await claims.updateOne({ _id: claim._id }, { $set: { status: 'submitted', submittedAt: new Date() } });

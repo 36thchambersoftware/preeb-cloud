@@ -97,8 +97,9 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
   ones with a live countdown, closed ones greyed out), `/claim/new` creates one,
   and `/claim/<id>` is the shareable page for a single campaign.
 - **API:** `GET/POST /api/claim/campaigns`, `GET /api/claim/<id>`,
-  `GET /api/claim/snapshot?id=<id>` (the public snapshot table), `POST /api/claim/prepare?id=<id>` and
-  `POST /api/claim/retry-snapshot?id=<id>` (owner only), `GET /api/claim/token-info`, and
+  `GET /api/claim/snapshot?id=<id>` (the public snapshot table), `GET /api/claim/token-info`,
+  `POST /api/claim/claim-challenge|claim-start|claim-finish?id=<id>` (claiming),
+  `POST /api/claim/retry-snapshot|reclaim|end-claims?id=<id>` (owner only), and
   `POST /api/claim/run-snapshots` (cron only).
 - **Token details come from the chain:** the server looks up the token when a
   campaign is created and ignores any decimals or ticker sent by the browser.
@@ -111,8 +112,13 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
 - **Funding:** after the snapshot the owner sends the total token amount plus a
   small ADA deposit (about 2 ADA per lane, refundable) to the campaign wallet.
   Viewing a campaign re-reads the wallet from Koios (cached for 30 seconds).
+- **Automatic:** nothing needs a button. Once the wallet is fully funded, the next
+  refresh (a page view or the scheduler's `run-snapshots` call) splits it into
+  lanes by itself, and claims and reclaims are confirmed as they land on chain.
+  Open pages update themselves too: every few seconds while something is in
+  flight, and they pause while the tab is hidden.
 - **Lanes:** one claim spends and recreates a wallet UTxO, so a single UTxO would
-  allow one claim at a time. "Prepare claims" splits the wallet in one
+  allow one claim at a time. Preparing splits the wallet in one
   transaction into up to 20 lanes, each holding exactly what its claimants are
   owed. A claimant's lane is a hash of their snapshot key. The campaign is
   ready once that transaction is confirmed.

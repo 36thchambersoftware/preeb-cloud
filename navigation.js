@@ -203,6 +203,20 @@
     walletState.api = api;
     rememberWallet(walletConfig.key);
     emitWalletChange();
+
+    // Switching accounts inside the wallet should switch the site too, without a reload.
+    try {
+      api.experimental?.on?.('accountChange', async () => {
+        try {
+          walletState.wallet = await readWalletDetails(walletConfig, api);
+          emitWalletChange();
+        } catch {
+          disconnectWallet();
+        }
+      });
+    } catch {
+      // Not every wallet exposes this event.
+    }
     return walletState.wallet;
   }
 

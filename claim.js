@@ -20,7 +20,6 @@
 
   const STATUS_LABELS = { upcoming: 'Upcoming', active: 'Open', closed: 'Closed' };
   const SETUP_LABELS = { 'awaiting-funding': 'Awaiting funding', 'ready-to-prepare': 'Setting up', preparing: 'Setting up' };
-  const SETUP_POLL_MS = 30_000;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -159,6 +158,8 @@
       const image = document.createElement('img');
       image.alt = '';
       image.loading = 'lazy';
+      // Once artwork loads, the ticker placeholder behind it is hidden so transparent images stay clean.
+      image.addEventListener('load', () => frame.classList.add('has-image'));
       attachImage(image, campaign.imageSources);
       frame.appendChild(image);
     }
@@ -199,41 +200,58 @@
   function renderCard(campaign) {
     const card = el('a', `claim-card claim-card--${campaign.status}`);
     card.href = `/claim/${campaign.id}`;
-    card.appendChild(createImage(campaign, 'claim-card__image claim-image'));
+
+    const media = createImage(campaign, 'claim-card__image claim-image');
+    const status = createStatusChip(campaign);
+    status.classList.add('claim-card__status');
+    media.appendChild(status);
+    media.appendChild(el('span', 'claim-card__ticker', campaign.tokenY.ticker));
+    card.appendChild(media);
 
     const body = el('div', 'claim-card__body');
-    const top = el('div', 'claim-card__top');
-    top.appendChild(createStatusChip(campaign));
-    top.appendChild(el('span', 'claim-card__ticker', campaign.tokenY.ticker));
-    body.appendChild(top);
     body.appendChild(el('h3', 'claim-card__title', campaign.title));
     body.appendChild(el('p', 'claim-card__meta', describeDistribution(campaign)));
 
+    const footer = el('div', 'claim-card__footer');
     const countdown = createCountdown(campaign);
     if (countdown) {
-      body.appendChild(countdown);
+      footer.appendChild(countdown);
     } else if (campaign.status === 'closed') {
-      body.appendChild(el('p', 'claim-card__meta', `Closed ${formatDate(campaign.claimEndsAt)}`));
+      footer.appendChild(el('span', 'claim-card__meta', `Closed ${formatDate(campaign.claimEndsAt)}`));
     } else if (campaign.snapshot.eligibleCount !== null) {
-      body.appendChild(el('p', 'claim-card__meta', `${campaign.snapshot.eligibleCount} eligible wallets`));
+      footer.appendChild(el('span', 'claim-card__meta', `${campaign.snapshot.eligibleCount.toLocaleString('en-US')} eligible wallets`));
     }
+    footer.appendChild(el('span', 'claim-card__cta', 'View ›'));
+    body.appendChild(footer);
     card.appendChild(body);
     return card;
   }
 
-  async function showList() {
-    els.listView.hidden = false;
-    onCountdownDone = showList;
-    try {
-      const { campaigns } = await request(`${API}/campaigns`);
-      const rank = { active: 0, upcoming: 1, closed: 2 };
-      campaigns.sort((a, b) => rank[a.status] - rank[b.status]);
+  let listSignature = '';
+
+  async function renderList() {
+    const { campaigns } = await request(`${API}/campaigns`);
+    const rank = { active: 0, upcoming: 1, closed: 2 };
+    campaigns.sort((a, b) => rank[a.status] - rank[b.status]);
+    const signature = JSON.stringify(campaigns.map((c) => [c.id, c.status, c.phase, c.countdownTo, c.snapshot.eligibleCount, c.title, c.imageUrl]));
+    if (signature !== listSignature) {
+      listSignature = signature;
       els.grid.replaceChildren(...campaigns.map(renderCard));
       els.empty.hidden = campaigns.length > 0;
-      showMessage('');
+    }
+    showMessage('');
+  }
+
+  async function showList() {
+    els.listView.hidden = false;
+    live.kind = 'list';
+    onCountdownDone = liveNow;
+    try {
+      await renderList();
     } catch (error) {
       showMessage(error.message, true);
     }
+    scheduleLive(15_000);
   }
 
   // Detail -----------------------------------------------------------------
@@ -289,19 +307,6 @@
       + ` and ${formatAmount(funding.lovelaceHeld, 6)} of ${formatAmount(funding.lovelaceRequired, 6)} ADA`;
   }
 
-  async function prepareCampaign(campaign, button) {
-    button.disabled = true;
-    button.textContent = 'Preparing…';
-    try {
-      await request(`${API}/prepare?id=${campaign.id}`, { method: 'POST' });
-      await showDetail(campaign.id);
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = 'Prepare claims';
-      showMessage(error.message, true);
-    }
-  }
-
   async function retrySnapshotRequest(campaign, button) {
     button.disabled = true;
     button.textContent = 'Retrying…';
@@ -330,9 +335,9 @@
     } else if (campaign.phase === 'awaiting-funding') {
       message.textContent = `Waiting for the organizer to fund this campaign. Wallet holds ${fundingLine(campaign)}.`;
     } else if (campaign.phase === 'ready-to-prepare') {
-      message.textContent = 'Funded. The organizer needs to prepare claims before they open.';
+      message.textContent = 'Funded. Getting claims ready…';
     } else if (campaign.phase === 'preparing') {
-      message.textContent = 'Preparing claims on chain. This usually takes a minute or two.';
+      message.textContent = 'Getting claims ready on chain. This usually takes a minute or two.';
     } else {
       message.textContent = 'Claims are open. Connect your wallet below to see what you can claim.';
     }
@@ -423,12 +428,6 @@
       owner.appendChild(el('code', 'claim-address', campaign.walletAddress));
       owner.appendChild(copyButton(campaign.walletAddress, 'Copy wallet address'));
       owner.appendChild(el('p', null, `Currently held: ${fundingLine(campaign)}.`));
-    }
-    if (campaign.phase === 'ready-to-prepare') {
-      const button = el('button', 'btn btn--primary', 'Prepare claims');
-      button.type = 'button';
-      button.addEventListener('click', () => prepareCampaign(campaign, button));
-      owner.appendChild(button);
     }
     appendReclaim(owner, campaign);
     return owner;
@@ -604,6 +603,7 @@
         status.classList.toggle('claim-warning', isError);
       };
       button.disabled = true;
+      state.claiming = true;
       try {
         if (!api) throw new Error('Reconnect your wallet from the header first.');
         say('Checking your wallet…');
@@ -647,23 +647,22 @@
         link.rel = 'noopener noreferrer';
         status.appendChild(link);
 
-        for (let poll = 0; poll < 30; poll += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 8000));
-          const result = await fetchPage(wallet.stake, 0, { handles: false });
-          if (result.entries[0]?.status === 'claimed') {
-            await checkMine();
-            return;
-          }
-        }
+        // The page keeps itself up to date from here: it watches this claim until it confirms.
+        state.claiming = false;
+        state.lastMine = 'reserved';
+        liveNow();
       } catch (error) {
         // A wallet's own "user declined" is not an error worth shouting about.
         const declined = error?.code === 2 || /declin|cancel|reject/i.test(error?.info || error?.message || '');
         say(declined ? 'Cancelled in your wallet. Nothing was spent.' : (error.message || 'The claim could not be completed.'), !declined);
         button.disabled = false;
+        // Leave the message on screen for a few seconds before the strip refreshes itself.
+        setTimeout(() => { state.claiming = false; }, 6000);
       }
     }
 
     async function checkMine() {
+      if (state.claiming) return;
       const wallet = window.PreebNavigation?.getConnectedWallet?.();
       const next = el('div', 'claim-mine');
       if (!wallet) {
@@ -702,7 +701,9 @@
         }
         mine.className = next.className;
         mine.replaceChildren(...next.childNodes);
-        if (entry && state.loaded) load();
+        const mineStatus = entry ? entry.status : null;
+        if (state.loaded && state.lastMine !== undefined && state.lastMine !== mineStatus) load();
+        state.lastMine = mineStatus;
       } catch {
         mine.replaceChildren(el('span', null, 'Could not check your wallet right now.'));
       }
@@ -879,23 +880,95 @@
     els.detailView.hidden = false;
   }
 
-  let detailPoll = null;
+  // Live updates -----------------------------------------------------------
+  // Nothing here needs a page refresh: the open page re-reads its campaign (or the list) on a
+  // timer, quickly while something is in flight, and redraws only when something changed.
+
+  const live = { timer: null, kind: null, id: null, signature: '', busy: false };
+
+  function detailSignature(campaign) {
+    return JSON.stringify([
+      campaign.status, campaign.phase, campaign.countdownTo, campaign.claimStartsAt, campaign.claimEndsAt,
+      campaign.stats, campaign.snapshot, campaign.lanes, campaign.reclaim, campaign.reclaimed,
+      campaign.reclaimEligibility, campaign.viewerIsOwner,
+      campaign.funding && [campaign.funding.status, campaign.funding.tokensHeld, campaign.funding.lovelaceHeld],
+    ]);
+  }
+
+  function pollDelay(campaign) {
+    const pendingClaim = snapshotViews.get(campaign.id)?.state.lastMine === 'reserved';
+    if (campaign.reclaim?.status === 'submitted' || pendingClaim) return 4000;
+    if (['preparing', 'ready-to-prepare'].includes(campaign.phase)) return 4000;
+    if (campaign.status === 'active') return 8000;
+    if (campaign.status === 'closed') return 20_000;
+    return 10_000;
+  }
+
+  function scheduleLive(delay) {
+    clearTimeout(live.timer);
+    if (delay > 0) live.timer = setTimeout(liveTick, delay);
+  }
+
+  function liveNow() {
+    scheduleLive(50);
+  }
+
+  async function liveTick() {
+    if (live.busy) return;
+    if (document.hidden) {
+      scheduleLive(10_000);
+      return;
+    }
+    live.busy = true;
+    let delay = 10_000;
+    try {
+      if (live.kind === 'detail') {
+        const { campaign } = await request(`${API}/${encodeURIComponent(live.id)}`);
+        const signature = detailSignature(campaign);
+        if (signature !== live.signature) {
+          live.signature = signature;
+          countdownNodes.clear();
+          renderDetail(campaign);
+          onCountdownDone = liveNow;
+        }
+        snapshotViews.get(campaign.id)?.checkMine();
+        delay = pollDelay(campaign);
+        showMessage('');
+      } else if (live.kind === 'list') {
+        await renderList();
+        delay = 15_000;
+      }
+    } catch {
+      // A failed refresh just tries again on the next beat; the page keeps showing what it has.
+      delay = 10_000;
+    } finally {
+      live.busy = false;
+      if (live.kind) scheduleLive(delay);
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && live.kind) liveNow();
+  });
+  window.addEventListener('online', () => live.kind && liveNow());
 
   async function showDetail(id) {
-    clearTimeout(detailPoll);
+    live.kind = 'detail';
+    live.id = id;
+    clearTimeout(live.timer);
     try {
       const { campaign } = await request(`${API}/${encodeURIComponent(id)}`);
       countdownNodes.clear();
+      live.signature = detailSignature(campaign);
       renderDetail(campaign);
-      onCountdownDone = () => showDetail(id);
-      if (campaign.status === 'active' && campaign.phase !== 'claiming') {
-        detailPoll = setTimeout(() => showDetail(id), SETUP_POLL_MS);
-      }
+      onCountdownDone = liveNow;
       showMessage('');
+      scheduleLive(pollDelay(campaign));
     } catch (error) {
       els.createLink.textContent = 'All campaigns';
       els.createLink.href = '/claim';
       showMessage(error.message, true);
+      scheduleLive(10_000);
     }
   }
 

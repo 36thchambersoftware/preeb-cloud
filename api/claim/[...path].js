@@ -19,7 +19,7 @@ import {
 } from '../_lib/claim-campaign.js';
 import { TokenInfoError, fetchRegistryLogo, resolveHolderToken, resolveToken } from '../_lib/token-info.js';
 import { resolveHandle } from '../_lib/handle.js';
-import { prepareLanes, refreshFunding } from '../_lib/claim-prepare.js';
+import { advanceCampaigns, refreshFunding } from '../_lib/claim-prepare.js';
 import {
   ClaimBusyError,
   countInFlightClaims,
@@ -72,8 +72,11 @@ export default async function handler(req, res) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
-      const results = await runDueSnapshots(await getDb());
-      res.status(200).json({ results });
+      const db = await getDb();
+      const results = await runDueSnapshots(db);
+      // The same call keeps funded campaigns moving: lanes get prepared, claims and reclaims confirmed.
+      const campaigns = await advanceCampaigns(db);
+      res.status(200).json({ results, campaigns });
       return;
     }
 
@@ -176,7 +179,7 @@ export default async function handler(req, res) {
     }
 
     // Vercel's catch-all only matches one path segment, so campaign actions take the id as a query parameter.
-    if (['prepare', 'retry-snapshot', 'snapshot', 'reclaim', 'end-claims'].includes(route)) {
+    if (['retry-snapshot', 'snapshot', 'reclaim', 'end-claims'].includes(route)) {
       const id = String(req.query?.id || '');
       if (!isCampaignId(id)) {
         res.status(400).json({ error: 'A valid campaign id is required.' });
@@ -196,7 +199,7 @@ export default async function handler(req, res) {
         return;
       }
 
-      if (['prepare', 'retry-snapshot', 'reclaim', 'end-claims'].includes(route) && req.method === 'POST') {
+      if (['retry-snapshot', 'reclaim', 'end-claims'].includes(route) && req.method === 'POST') {
         const db = await getDb();
         const existing = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: id }, { projection: { 'owner.stake': 1 } });
         if (!existing) {
@@ -209,7 +212,7 @@ export default async function handler(req, res) {
           return;
         }
 
-        const actions = { prepare: prepareLanes, 'retry-snapshot': retrySnapshot, reclaim: reclaimFunds, 'end-claims': endClaims };
+        const actions = { 'retry-snapshot': retrySnapshot, reclaim: reclaimFunds, 'end-claims': endClaims };
         const result = await actions[route](db, id);
         const campaign = await getPublicCampaign(db, id, new Date(), viewerStakes);
         res.status(200).json({ campaign, ...result });
