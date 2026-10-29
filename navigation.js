@@ -151,7 +151,7 @@
   // Connected wallet shown in the header ---------------------------------------
 
   const WALLET_STORAGE_KEY = 'preeb-nav-wallet';
-  const walletState = { wallet: null };
+  const walletState = { wallet: null, api: null };
 
   function shorten(value, head = 9, tail = 6) {
     return value && value.length > head + tail + 1 ? `${value.slice(0, head)}…${value.slice(-tail)}` : value || '';
@@ -200,6 +200,7 @@
   async function connectWallet(walletConfig) {
     const api = await walletConfig.provider.enable();
     walletState.wallet = await readWalletDetails(walletConfig, api);
+    walletState.api = api;
     rememberWallet(walletConfig.key);
     emitWalletChange();
     return walletState.wallet;
@@ -207,6 +208,7 @@
 
   function disconnectWallet() {
     walletState.wallet = null;
+    walletState.api = null;
     rememberWallet(null);
     try {
       window.sessionStorage.removeItem('preeb-last-wallet-key');
@@ -457,6 +459,7 @@
     rewardHexToStakeAddress,
     addressHexToBech32,
     getConnectedWallet: () => walletState.wallet,
+    getWalletApi: () => walletState.api,
     connectWallet,
     disconnectWallet,
   };

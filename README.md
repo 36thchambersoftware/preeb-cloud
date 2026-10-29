@@ -90,9 +90,8 @@ phase because the current code does not call Discord's bot API.
 
 A claim campaign lets token X holders claim token Y from a per-campaign wallet,
 instead of the project paying minimum ADA for every recipient. This section
-covers what exists so far: the `/claim` pages, campaigns, encrypted funding
-wallets, snapshots, funding checks and claim lanes. The claim transaction and the
-owner reclaim sweep are still to come.
+covers the `/claim` pages, campaigns, encrypted funding wallets, snapshots,
+funding checks, claim lanes, the claim transaction and the owner reclaim.
 
 - **Pages:** `/claim` lists the 12 most recent campaigns (open first, upcoming
   ones with a live countdown, closed ones greyed out), `/claim/new` creates one,
@@ -153,15 +152,33 @@ owner reclaim sweep are still to come.
   (`localStorage`) and silently reconnects when the wallet already trusts the
   site; `window.PreebNavigation` exposes `getConnectedWallet()` and a
   `preeb:wallet` event for pages that need it.
+- **Claiming:** the holder's wallet proves it owns the stake address (a CIP-8
+  signature over a short-lived challenge, skipped if the browser already
+  verified that wallet), the server reserves the entitlement and the holder's
+  lane, builds one transaction and signs it with the campaign wallet, the holder
+  signs it in their wallet, and the server submits it. The holder spends only the
+  network fee: the ADA that carries the tokens is their own and comes back in the
+  same transaction. A transaction is valid for 5 minutes, so an abandoned attempt
+  frees its lane after that. Only one claim per lane is in flight at a time.
+- **Getting funds back:** the owner can reclaim (sweep the whole campaign wallet,
+  tokens and ADA, to the payout address fixed at creation) before claims open and
+  after they close plus 15 minutes. While claims are open it is refused. A
+  campaign without an end date can be ended by its owner after claims have been
+  open 24 hours. If the website is unavailable,
+  `node scripts/emergency-sweep.mjs <campaignId> [--send]` does the same from a
+  machine that has the environment variables. Funds are only recoverable while
+  `CLAIM_WALLET_KEY_SECRET` and the database (`claim_wallets`) both survive, so
+  back both up.
 - **Owner:** creating a campaign requires a wallet verified in this browser
   (the signed wallet-session cookie). The reclaim address must be a base
   address of that same wallet.
 - **Environment:** `CLAIM_WALLET_KEY_SECRET`, `CLAIM_CRON_SECRET` (both 32+
   characters) and optionally `CLAIM_NETWORK=preprod` (default `mainnet`).
 - **MongoDB access:** the database user needs read/write and index access on
-  `claim_campaigns`, `claim_wallets`, `claim_entitlements` and `claim_lanes`.
+  `claim_campaigns`, `claim_wallets`, `claim_entitlements`, `claim_lanes` and
+  `claim_claims`.
 
-Run the tests with `node --test tests/claim.test.js tests/claim-funding.test.js`.
+Run the tests with `node --test "tests/*.test.js"`.
 
 ## Airdrop transaction funding
 

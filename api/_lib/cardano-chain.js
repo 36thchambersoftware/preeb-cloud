@@ -49,6 +49,24 @@ export async function fetchConfirmations(txHashes, network, fetchImpl) {
   return new Map(rows.map((row) => [row.tx_hash, Number(row.num_confirmations) || 0]));
 }
 
+/** The chain's current absolute slot, used to set transaction expiry. */
+export async function fetchTipSlot(network, fetchImpl) {
+  const [tip] = await koios(network, 'tip', { fetchImpl });
+  const slot = Number(tip?.abs_slot);
+  if (!Number.isFinite(slot) || slot <= 0) throw new ChainError('Koios returned an unexpected chain tip.');
+  return slot;
+}
+
+/** Current state of specific UTxOs ("hash#index"). Unspent ones only. */
+export async function fetchUtxoInfo(refs, network, fetchImpl) {
+  const rows = await koios(network, 'utxo_info', {
+    method: 'POST',
+    body: JSON.stringify({ _utxo_refs: refs, _extended: true }),
+    fetchImpl,
+  });
+  return (Array.isArray(rows) ? rows : []).filter((row) => !row.is_spent);
+}
+
 export async function submitTransaction(txBytes, network, fetchImpl) {
   const hash = await koios(network, 'submittx', {
     method: 'POST',

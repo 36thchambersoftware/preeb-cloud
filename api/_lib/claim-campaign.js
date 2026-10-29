@@ -56,6 +56,7 @@ export async function ensureClaimIndexes(db) {
       db.collection(ENTITLEMENTS_COLLECTION).createIndex({ campaignId: 1, amountNum: -1, key: 1 }),
       db.collection(ENTITLEMENTS_COLLECTION).createIndex({ campaignId: 1, balanceNum: -1, key: 1 }),
       db.collection(LANES_COLLECTION).createIndex({ campaignId: 1, index: 1 }, { unique: true }),
+      db.collection('claim_claims').createIndex({ campaignId: 1, status: 1 }),
     ]);
     globalThis.__preebClaimIndexesReady = true;
   } catch (error) {
@@ -368,6 +369,10 @@ export function toPublicCampaign(campaign, now = new Date(), { viewerStakes = []
     distribution: campaign.distribution,
     filters: campaign.filters,
     walletAddress: campaign.wallet.address,
+    reclaimed: Boolean(campaign.reclaimedAt),
+    reclaim: campaign.reclaim
+      ? { status: campaign.reclaim.status, txHash: campaign.reclaim.txHash || null, destination: campaign.reclaim.destination || null, error: campaign.reclaim.error || null }
+      : null,
     claimStartsAt: iso(campaign.claimStartsAt),
     claimEndsAt: iso(campaign.claimEndsAt),
     createdAt: iso(campaign.createdAt),

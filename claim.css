@@ -269,3 +269,9 @@ details.claim-snapshot { display: block; border: 1px solid var(--color-border); 
 .claim-sort { all: unset; cursor: pointer; display: inline-flex; gap: 0.3rem; align-items: center; color: inherit; text-transform: inherit; letter-spacing: inherit; font: inherit; }
 .claim-sort:hover, .claim-sort.is-active { color: var(--color-cyan); }
 .claim-sort__arrow { font-size: 0.65rem; min-width: 0.8em; }
+
+.claim-reclaim { display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; padding-top: 0.5rem; border-top: 1px solid var(--color-border); width: 100%; }
+.claim-reclaim h4 { font-family: var(--font-heading); }
+.claim-success { color: var(--color-green); }
+.claim-mine__status { flex-basis: 100%; font-size: 0.9rem; color: var(--color-text-muted); }
+.claim-mine__status.claim-warning { color: var(--color-gold); }

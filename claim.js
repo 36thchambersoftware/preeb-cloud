@@ -63,6 +63,10 @@
     return `${(big / unit).toLocaleString('en-US')}${fraction ? `.${fraction}` : ''}`;
   }
 
+  const utf8ToHex = (value) => Array.from(new TextEncoder().encode(value), (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+  const explorerTx = (campaign, hash) => `https://${campaign.network === 'preprod' ? 'preprod.' : ''}cardanoscan.io/transaction/${hash}`;
+
   function formatDate(iso) {
     if (!iso) return '—';
     return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -330,14 +334,65 @@
     } else if (campaign.phase === 'preparing') {
       message.textContent = 'Preparing claims on chain. This usually takes a minute or two.';
     } else {
-      message.textContent = 'Funded and ready. Claim transactions are not live yet. Check back soon.';
+      message.textContent = 'Claims are open. Connect your wallet below to see what you can claim.';
     }
     return panel;
   }
 
+  async function ownerAction(path, campaign, button, busyText, label) {
+    button.disabled = true;
+    button.textContent = busyText;
+    try {
+      await request(`${API}/${path}?id=${campaign.id}`, { method: 'POST' });
+      await showDetail(campaign.id);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = label;
+      showMessage(error.message, true);
+    }
+  }
+
+  // Taking the funds out: always possible before claims open and after they close.
+  function appendReclaim(owner, campaign) {
+    const section = el('div', 'claim-reclaim');
+    section.appendChild(el('h4', null, 'Reclaim funds'));
+    const payout = campaign.payoutAddress ? shorten(campaign.payoutAddress, 14, 10) : 'your wallet';
+    section.appendChild(el('p', null, `Everything in the campaign wallet (tokens and ADA) goes back to ${payout}, the address you created this campaign with. It can never go anywhere else.`));
+
+    const reclaim = campaign.reclaim;
+    if (reclaim?.status === 'submitted' && reclaim.txHash) {
+      const link = el('a', null, 'View transaction');
+      link.href = explorerTx(campaign, reclaim.txHash);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      section.appendChild(el('p', null, 'Reclaim submitted and waiting for confirmation. '));
+      section.lastChild.appendChild(link);
+    } else if (reclaim?.status === 'confirmed' && campaign.reclaimed) {
+      section.appendChild(el('p', 'claim-success', 'Funds returned to you. If anything is sent to the campaign wallet later, you can reclaim again.'));
+    }
+
+    const eligibility = campaign.reclaimEligibility;
+    if (eligibility?.allowed && reclaim?.status !== 'submitted') {
+      const button = el('button', 'btn btn--primary', 'Reclaim funds');
+      button.type = 'button';
+      button.addEventListener('click', () => ownerAction('reclaim', campaign, button, 'Sending…', 'Reclaim funds'));
+      section.appendChild(button);
+    } else if (eligibility && !eligibility.allowed) {
+      section.appendChild(el('p', 'claim-warning', eligibility.reason));
+      if (eligibility.canEndAt && new Date(eligibility.canEndAt) <= new Date()) {
+        const end = el('button', 'btn btn--outline', 'End claims now');
+        end.type = 'button';
+        end.addEventListener('click', () => ownerAction('end-claims', campaign, end, 'Ending…', 'End claims now'));
+        section.appendChild(end);
+      }
+    }
+    if (reclaim?.error) section.appendChild(el('p', 'claim-warning', reclaim.error));
+    owner.appendChild(section);
+  }
+
   // Only the campaign's owner, with the owner's wallet connected, gets the controls.
   function buildOwnerPanel(campaign) {
-    if (!campaign.viewerIsOwner || campaign.status === 'closed') return null;
+    if (!campaign.viewerIsOwner) return null;
 
     const owner = el('div', 'claim-panel claim-panel--owner');
     owner.appendChild(el('h3', null, 'Owner'));
@@ -347,12 +402,18 @@
       return owner;
     }
 
+    if (campaign.status === 'closed') {
+      appendReclaim(owner, campaign);
+      return owner;
+    }
+
     if (campaign.snapshot.status === 'failed') {
       owner.appendChild(el('p', null, `The snapshot failed: ${campaign.snapshot.error || 'unknown error'}. It was retried automatically; you can run it again now.`));
       const retry = el('button', 'btn btn--primary', 'Retry snapshot');
       retry.type = 'button';
       retry.addEventListener('click', () => retrySnapshotRequest(campaign, retry));
       owner.appendChild(retry);
+      appendReclaim(owner, campaign);
       return owner;
     }
     if (campaign.snapshot.status === 'taken' && campaign.phase !== 'claiming' && campaign.phase !== 'preparing') {
@@ -369,7 +430,7 @@
       button.addEventListener('click', () => prepareCampaign(campaign, button));
       owner.appendChild(button);
     }
-    owner.appendChild(el('p', 'claim-warning', 'Reclaiming leftover funds is not available yet. Only fund a campaign you are ready to run.'));
+    appendReclaim(owner, campaign);
     return owner;
   }
 
@@ -387,7 +448,8 @@
     return cell;
   }
 
-  function createSnapshotView(campaign) {
+  function createSnapshotView(initialCampaign) {
+    let campaign = initialCampaign;
     const id = campaign.id;
     const state = { query: '', page: 0, token: 0, sort: 'claim', dir: 'desc', retries: 0, loaded: false };
     const holderTicker = campaign.tokenX?.ticker || campaign.tokenX?.name || '';
@@ -469,7 +531,7 @@
       tr.appendChild(walletCell(entry));
       if (campaign.tokenX) tr.appendChild(el('td', null, `${formatAmount(entry.balance, campaign.tokenX.decimals || 0)} ${holderTicker}`));
       tr.appendChild(el('td', null, `${formatAmount(entry.amount, campaign.tokenY.decimals)} ${campaign.tokenY.ticker}`));
-      tr.appendChild(el('td', null, entry.status === 'claimed' ? 'Claimed' : 'Unclaimed'));
+      tr.appendChild(el('td', null, { claimed: 'Claimed', reserved: 'Pending' }[entry.status] || 'Unclaimed'));
       return tr;
     };
 
@@ -531,29 +593,118 @@
       }
     }
 
+    // Claiming: prove ownership (once per browser), let the server build the transaction,
+    // have the wallet sign it, and let the server add its own signature and submit.
+    async function claimNow(entry, status, button) {
+      const nav = window.PreebNavigation;
+      const wallet = nav.getConnectedWallet();
+      const api = nav.getWalletApi?.();
+      const say = (text, isError = false) => {
+        status.textContent = text;
+        status.classList.toggle('claim-warning', isError);
+      };
+      button.disabled = true;
+      try {
+        if (!api) throw new Error('Reconnect your wallet from the header first.');
+        say('Checking your wallet…');
+        const networkId = await api.getNetworkId();
+        if ((campaign.network === 'mainnet') !== (networkId === 1)) {
+          throw new Error(`Switch your wallet to ${campaign.network} to claim.`);
+        }
+
+        const challenge = await request(`${API}/claim-challenge?id=${id}`, { method: 'POST', body: JSON.stringify({ stake: wallet.stake }) });
+        let proof = {};
+        if (!challenge.verified) {
+          say(`Confirm the signature request in ${wallet.label} to prove this wallet is yours…`);
+          const [rewardHex] = await api.getRewardAddresses();
+          const signed = await api.signData(rewardHex, utf8ToHex(challenge.message));
+          proof = { token: challenge.token, signatureHex: signed.signature, keyHex: signed.key };
+        }
+
+        say('Preparing your claim…');
+        const utxos = (await api.getUtxos()) || [];
+        const address = nav.addressHexToBech32(await api.getChangeAddress());
+        let started = null;
+        for (let attempt = 0; attempt < 6 && !started; attempt += 1) {
+          try {
+            started = await request(`${API}/claim-start?id=${id}`, { method: 'POST', body: JSON.stringify({ stake: wallet.stake, address, utxos, ...proof }) });
+          } catch (error) {
+            if (!/try again in about a minute/.test(error.message) || attempt === 5) throw error;
+            say('Other claims are being processed. Trying again in a few seconds…');
+            await new Promise((resolve) => setTimeout(resolve, 6000));
+          }
+        }
+
+        say(`Approve the transaction in ${wallet.label}. You only pay the network fee (about ${(Number(started.fee) / 1e6).toFixed(2)} ADA).`);
+        const witnessSet = await api.signTx(started.txHex, true);
+
+        say('Submitting…');
+        const { txHash } = await request(`${API}/claim-finish?id=${id}`, { method: 'POST', body: JSON.stringify({ stake: wallet.stake, reservationId: started.reservationId, witnessSet }) });
+        status.replaceChildren(document.createTextNode('Claim submitted. Waiting for confirmation… '));
+        const link = el('a', null, 'View transaction');
+        link.href = explorerTx(campaign, txHash);
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        status.appendChild(link);
+
+        for (let poll = 0; poll < 30; poll += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 8000));
+          const result = await fetchPage(wallet.stake, 0, { handles: false });
+          if (result.entries[0]?.status === 'claimed') {
+            await checkMine();
+            return;
+          }
+        }
+      } catch (error) {
+        // A wallet's own "user declined" is not an error worth shouting about.
+        const declined = error?.code === 2 || /declin|cancel|reject/i.test(error?.info || error?.message || '');
+        say(declined ? 'Cancelled in your wallet. Nothing was spent.' : (error.message || 'The claim could not be completed.'), !declined);
+        button.disabled = false;
+      }
+    }
+
     async function checkMine() {
       const wallet = window.PreebNavigation?.getConnectedWallet?.();
-      mine.className = 'claim-mine';
-      mine.replaceChildren();
+      const next = el('div', 'claim-mine');
       if (!wallet) {
-        mine.appendChild(el('span', null, 'Connect your wallet to see what you qualify for.'));
+        next.appendChild(el('span', null, campaign.phase === 'claiming'
+          ? 'Connect your wallet to claim.'
+          : 'Connect your wallet to see what you qualify for.'));
         const connect = el('button', 'btn btn--outline btn--sm', 'Connect wallet');
         connect.type = 'button';
         connect.addEventListener('click', () => document.getElementById('nav-wallet-btn')?.click());
-        mine.appendChild(connect);
+        next.appendChild(connect);
+        mine.className = next.className;
+        mine.replaceChildren(...next.childNodes);
         return;
       }
       try {
         const result = await fetchPage(wallet.stake, 0, { handles: false });
         const entry = result.entries[0];
-        mine.classList.add(entry ? 'claim-mine--yes' : 'claim-mine--no');
-        mine.appendChild(el('strong', null, `${wallet.label} · ${shorten(wallet.stake, 10, 6)}`));
-        mine.appendChild(el('span', null, entry
-          ? `You qualify for ${formatAmount(entry.amount, campaign.tokenY.decimals)} ${campaign.tokenY.ticker}${entry.status === 'claimed' ? ' (already claimed)' : ''}.`
-          : 'This wallet is not in the snapshot.'));
+        next.classList.add(entry ? 'claim-mine--yes' : 'claim-mine--no');
+        next.appendChild(el('strong', null, `${wallet.label} · ${shorten(wallet.stake, 10, 6)}`));
+        const share = entry ? `${formatAmount(entry.amount, campaign.tokenY.decimals)} ${campaign.tokenY.ticker}` : '';
+        if (!entry) {
+          next.appendChild(el('span', null, 'This wallet is not in the snapshot.'));
+        } else if (entry.status === 'claimed') {
+          next.appendChild(el('span', 'claim-success', `You claimed ${share}.`));
+        } else if (entry.status === 'reserved') {
+          next.appendChild(el('span', null, `Your claim of ${share} is being confirmed…`));
+        } else if (campaign.phase === 'claiming') {
+          next.appendChild(el('span', null, `You can claim ${share}.`));
+          const button = el('button', 'btn btn--primary btn--sm', `Claim ${share}`);
+          button.type = 'button';
+          const status = el('span', 'claim-mine__status');
+          button.addEventListener('click', () => claimNow(entry, status, button));
+          next.append(button, status);
+        } else {
+          next.appendChild(el('span', null, `You qualify for ${share}.`));
+        }
+        mine.className = next.className;
+        mine.replaceChildren(...next.childNodes);
         if (entry && state.loaded) load();
       } catch {
-        mine.appendChild(el('span', null, 'Could not check your wallet right now.'));
+        mine.replaceChildren(el('span', null, 'Could not check your wallet right now.'));
       }
     }
 
@@ -585,7 +736,15 @@
     previous.addEventListener('click', () => { state.page -= 1; state.retries = 0; load(); });
     next.addEventListener('click', () => { state.page += 1; state.retries = 0; load(); });
 
-    return { panel, mine, load, checkMine, isOpen: () => panel.open, state };
+    return {
+      panel,
+      mine,
+      load,
+      checkMine,
+      isOpen: () => panel.open,
+      state,
+      setCampaign(next) { campaign = next; },
+    };
   }
 
   function snapshotViewFor(campaign) {
@@ -594,9 +753,14 @@
       view = createSnapshotView(campaign);
       snapshotViews.set(campaign.id, view);
       view.checkMine();
-    } else if (view.isOpen()) {
-      view.load();
+    } else {
+      const phaseChanged = view.phase !== campaign.phase;
+      view.setCampaign(campaign);
+      view.phase = campaign.phase;
+      if (view.isOpen()) view.load();
+      if (phaseChanged) view.checkMine();
     }
+    view.phase = campaign.phase;
     return view;
   }
 

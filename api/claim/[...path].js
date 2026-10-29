@@ -20,6 +20,15 @@ import {
 import { TokenInfoError, fetchRegistryLogo, resolveHolderToken, resolveToken } from '../_lib/token-info.js';
 import { resolveHandle } from '../_lib/handle.js';
 import { prepareLanes, refreshFunding } from '../_lib/claim-prepare.js';
+import {
+  ClaimBusyError,
+  countInFlightClaims,
+  createClaimChallenge,
+  finishClaim,
+  startClaim,
+  verifyClaimer,
+} from '../_lib/claim-claims.js';
+import { endClaims, reclaimEligibility, reclaimFunds } from '../_lib/claim-reclaim.js';
 
 function getSegments(req) {
   const fromQuery = req.query?.path;
@@ -68,7 +77,9 @@ export default async function handler(req, res) {
       return;
     }
 
-    const limit = req.method === 'POST' ? { limit: 5, windowMs: 60 * 60_000 } : { limit: 120, windowMs: 60_000 };
+    // Creating campaigns is tightly limited; claiming and owner actions get a normal allowance.
+    let limit = { limit: 120, windowMs: 60_000 };
+    if (req.method === 'POST') limit = route === 'campaigns' ? { limit: 5, windowMs: 60 * 60_000 } : { limit: 40, windowMs: 60_000 };
     const rate = checkRateLimit(`claim:${req.method}:${getClientIp(req)}`, limit);
     if (!rate.allowed) {
       rejectRateLimited(res, rate.retryAfterSeconds);
@@ -165,7 +176,7 @@ export default async function handler(req, res) {
     }
 
     // Vercel's catch-all only matches one path segment, so campaign actions take the id as a query parameter.
-    if (['prepare', 'retry-snapshot', 'snapshot'].includes(route)) {
+    if (['prepare', 'retry-snapshot', 'snapshot', 'reclaim', 'end-claims'].includes(route)) {
       const id = String(req.query?.id || '');
       if (!isCampaignId(id)) {
         res.status(400).json({ error: 'A valid campaign id is required.' });
@@ -185,7 +196,7 @@ export default async function handler(req, res) {
         return;
       }
 
-      if (route !== 'snapshot' && req.method === 'POST') {
+      if (['prepare', 'retry-snapshot', 'reclaim', 'end-claims'].includes(route) && req.method === 'POST') {
         const db = await getDb();
         const existing = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: id }, { projection: { 'owner.stake': 1 } });
         if (!existing) {
@@ -198,10 +209,72 @@ export default async function handler(req, res) {
           return;
         }
 
-        const result = route === 'prepare' ? await prepareLanes(db, id) : await retrySnapshot(db, id);
+        const actions = { prepare: prepareLanes, 'retry-snapshot': retrySnapshot, reclaim: reclaimFunds, 'end-claims': endClaims };
+        const result = await actions[route](db, id);
         const campaign = await getPublicCampaign(db, id, new Date(), viewerStakes);
         res.status(200).json({ campaign, ...result });
         return;
+      }
+    }
+
+    if (['claim-challenge', 'claim-start', 'claim-finish'].includes(route) && req.method === 'POST') {
+      const id = String(req.query?.id || '');
+      if (!isCampaignId(id)) {
+        res.status(400).json({ error: 'A valid campaign id is required.' });
+        return;
+      }
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+      const stake = String(body.stake || '').trim();
+      if (!/^stake1[0-9a-z]+$|^stake_test1[0-9a-z]+$/.test(stake)) {
+        res.status(400).json({ error: 'A valid stake address is required.' });
+        return;
+      }
+
+      const db = await getDb();
+      const campaign = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: id }, { projection: { 'snapshot.rows': 0 } });
+      if (!campaign) {
+        res.status(404).json({ error: 'Campaign not found.' });
+        return;
+      }
+      const verifiedStakes = readWalletSession(req);
+
+      if (route === 'claim-challenge') {
+        res.status(200).json(verifiedStakes.includes(stake) ? { verified: true } : createClaimChallenge(id, stake));
+        return;
+      }
+
+      try {
+        if (route === 'claim-start') {
+          verifyClaimer({
+            campaignId: id,
+            stake,
+            verifiedStakes,
+            token: body.token,
+            signatureHex: body.signatureHex,
+            keyHex: body.keyHex,
+          });
+          const result = await startClaim(db, campaign, {
+            stake,
+            claimerAddress: String(body.address || ''),
+            utxoHexes: body.utxos,
+          });
+          res.status(200).json(result);
+          return;
+        }
+
+        const result = await finishClaim(db, campaign, {
+          reservationId: body.reservationId,
+          stake,
+          witnessSetHex: body.witnessSet,
+        });
+        res.status(200).json(result);
+        return;
+      } catch (error) {
+        if (error instanceof ClaimBusyError) {
+          res.status(409).json({ error: error.message, busy: true });
+          return;
+        }
+        throw error;
       }
     }
 
@@ -223,6 +296,17 @@ export default async function handler(req, res) {
         return;
       }
       campaign.ownerHandle = await resolveHandle(campaign.owner, { network: campaign.network });
+      if (campaign.viewerIsOwner) {
+        campaign.payoutAddress = (await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: route }, { projection: { 'owner.payoutAddress': 1 } }))?.owner?.payoutAddress || null;
+        const raw = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: route }, { projection: { lanes: 1 } });
+        const inFlight = await countInFlightClaims(db, { _id: route, lanes: raw?.lanes });
+        campaign.reclaimEligibility = reclaimEligibility({
+          snapshot: campaign.snapshot,
+          claimStartsAt: campaign.claimStartsAt,
+          claimEndsAt: campaign.claimEndsAt,
+          reclaimed: campaign.reclaimed,
+        }, new Date(), inFlight);
+      }
       res.status(200).json({ campaign });
       return;
     }

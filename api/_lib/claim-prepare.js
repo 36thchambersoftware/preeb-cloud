@@ -21,6 +21,8 @@ import {
   loadCsl,
 } from './claim-funding.js';
 import { signWithClaimWallet } from './claim-wallet.js';
+import { settleClaims } from './claim-claims.js';
+import { settleReclaim } from './claim-reclaim.js';
 
 const FUNDING_CACHE_MS = 30_000;
 const STALE_PREPARE_MS = 10 * 60 * 1000;
@@ -81,14 +83,15 @@ export async function refreshFunding(db, campaign, { now = new Date(), force = f
 
   try {
     const settled = await settleLanes(db, campaign, now, fetchImpl);
+    if (campaign.lanes?.status === 'ready' || settled === 'ready') await settleClaims(db, campaign._id, { now, fetchImpl });
+    await settleReclaim(db, campaign, { now, fetchImpl });
     const { funding } = await readFunding(campaign, fetchImpl);
     const stored = { ...funding, checkedAt: now };
     await db.collection(CAMPAIGNS_COLLECTION).updateOne({ _id: campaign._id }, { $set: { funding: stored } });
-    return {
-      ...campaign,
-      funding: stored,
-      lanes: settled ? { ...campaign.lanes, status: settled } : campaign.lanes,
-    };
+
+    // Settling may have changed lanes, claims and the reclaim state, so read the result back.
+    const fresh = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: campaign._id }, { projection: { 'snapshot.rows': 0 } });
+    return { ...(fresh || campaign), funding: stored };
   } catch (error) {
     console.error('[PREEB] Could not refresh campaign funding:', error);
     return campaign;
