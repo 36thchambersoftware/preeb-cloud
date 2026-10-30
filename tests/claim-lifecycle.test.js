@@ -15,10 +15,14 @@ process.env.SESSION_SECRET = 'test-session-secret-0123456789abcdefghijkl';
 const at = (iso) => new Date(iso);
 const taken = { snapshot: { status: 'taken' } };
 
-test('the owner can reclaim before claims open, and after they close once pending claims have had time to land', () => {
+test('the owner cannot reclaim once the snapshot is taken until claims close and pending claims have had time to land', () => {
   const campaign = { ...taken, claimStartsAt: '2026-03-01T00:15:00Z', claimEndsAt: '2026-03-03T00:15:00Z' };
 
-  assert.equal(reclaimEligibility(campaign, at('2026-02-28T12:00:00Z')).allowed, true);
+  const beforeOpening = reclaimEligibility(campaign, at('2026-02-28T12:00:00Z'));
+  assert.equal(beforeOpening.allowed, false);
+  assert.match(beforeOpening.reason, /run until/);
+  assert.equal(beforeOpening.availableAt, new Date(at('2026-03-03T00:15:00Z').getTime() + RECLAIM_GRACE_MS).toISOString());
+  assert.equal(reclaimEligibility({ snapshot: { status: 'scheduled' } }, at('2026-02-28T12:00:00Z')).allowed, true);
   assert.equal(reclaimEligibility({ snapshot: { status: 'failed' } }, at('2026-03-02T00:00:00Z')).allowed, true);
 
   const open = reclaimEligibility(campaign, at('2026-03-02T00:00:00Z'));

@@ -30,10 +30,12 @@ import { settleReclaim } from './claim-reclaim.js';
 const FUNDING_CACHE_MS = 30_000;
 const STALE_PREPARE_MS = 10 * 60 * 1000;
 
-export async function readFunding(campaign, fetchImpl) {
+export async function readFunding(campaign, fetchImpl, { checkingBeforePreparing = false } = {}) {
   const utxos = await fetchAddressUtxos(campaign.wallet.address, campaign.network, fetchImpl);
   const balances = summarizeUtxos(utxos, campaign.tokenY);
-  return { utxos, funding: evaluateFunding(fundingRequirements(campaign), balances) };
+  // The preparation step itself marks the campaign 'preparing' before it checks, and must check for real.
+  const prepared = !checkingBeforePreparing && ['preparing', 'submitted', 'ready'].includes(campaign.lanes?.status);
+  return { utxos, funding: evaluateFunding(fundingRequirements(campaign), balances, { prepared }) };
 }
 
 /**
@@ -179,7 +181,7 @@ export async function prepareLanes(db, campaignId, { now = new Date(), fetchImpl
   let built = null;
   try {
     await ensureCampaignSealed(db, campaign);
-    const { utxos, funding } = await readFunding(campaign, fetchImpl);
+    const { utxos, funding } = await readFunding(campaign, fetchImpl, { checkingBeforePreparing: true });
     if (funding.status !== 'funded') {
       await resetLanes(db, campaignId);
       throw new ClaimInputError('The campaign wallet does not hold the required tokens and ADA yet.');

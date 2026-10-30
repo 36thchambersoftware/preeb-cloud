@@ -28,6 +28,7 @@ import {
   startClaim,
   verifyClaimer,
 } from '../_lib/claim-claims.js';
+import { fetchAddressUtxos } from '../_lib/cardano-chain.js';
 import { endClaims, reclaimEligibility, reclaimFunds } from '../_lib/claim-reclaim.js';
 import { buildFunding, submitFunding } from '../_lib/claim-fund.js';
 
@@ -320,6 +321,15 @@ export default async function handler(req, res) {
           claimEndsAt: campaign.claimEndsAt,
           reclaimed: campaign.reclaimed,
         }, new Date(), inFlight);
+        // Before a snapshot succeeds the wallet balance is never read, but the owner should not be
+        // offered a reclaim of nothing.
+        if (!campaign.funding) {
+          try {
+            campaign.walletEmpty = (await fetchAddressUtxos(campaign.walletAddress, campaign.network)).length === 0;
+          } catch (error) {
+            console.error('[PREEB] Could not read the campaign wallet balance:', error);
+          }
+        }
       }
       res.status(200).json({ campaign });
       return;

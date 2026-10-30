@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import nacl from 'tweetnacl';
 import {
@@ -286,6 +287,20 @@ test('the minimum balance is typed in whole tokens and stored in base units', ()
   );
 });
 
+test('an uploaded list ignores a minimum balance left over from the token form', () => {
+  const options = { ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, now: new Date('2026-01-01T00:00:00Z'), network: 'mainnet' };
+  const body = baseBody({
+    snapshot: { source: 'json', holders: [{ address: BASE_ADDRESS, quantity: 1 }] },
+    filters: { minBalance: '1,000,000' },
+  });
+  assert.equal(parseCampaignInput(body, options).filters.minBalance, '0');
+});
+
+test('claim.js only sends the minimum balance for holders of a token', () => {
+  const source = readFileSync(new URL('../claim.js', import.meta.url), 'utf8');
+  assert.match(source, /minBalance: source === 'koios' \? stripCommas/);
+});
+
 test('claims open at least 15 minutes after the snapshot and stay open at least 24 hours', () => {
   const now = new Date('2026-01-01T12:00:00Z');
   const options = { ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet' };
@@ -455,6 +470,29 @@ test('a campaign with a chosen UTxO count gives every wallet its own when there 
   assert.equal(db.campaigns[0].lanes.count, 2);
   assert.deepEqual(db.entitlements.map((row) => row.lane).sort(), [0, 1]);
   assert.ok(db.entitlements.every((row) => typeof row.seal === 'string'));
+});
+
+test('a minimum balance stored on an uploaded-list campaign does not empty the snapshot', async () => {
+  const campaign = snapshotCampaign({ filters: { minBalance: '1000000', excludeScripts: true, exclude: [] } });
+  campaign.snapshot.rows = [{ address: BASE_ADDRESS, quantity: 2000 }, { address: holderB, quantity: 1000 }];
+  const db = createClaimDb(campaign);
+  const result = await runSnapshot(db, 'abcdefghjk', { now: new Date('2026-01-02T00:00:00Z') });
+  assert.equal(result.status, 'taken');
+  assert.equal(db.entitlements.length, 2);
+});
+
+test('an empty snapshot says why holders were skipped', async () => {
+  const campaign = snapshotCampaign({ filters: { minBalance: '5000', excludeScripts: true, exclude: [] }, snapshot: {
+    source: 'koios', status: 'scheduled', attempts: 2, scheduledFor: new Date('2026-01-01T00:00:00Z'),
+  }, tokenX: { policyId: 'a'.repeat(56), decimals: 0 } });
+  const db = createClaimDb(campaign);
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => [{ payment_address: BASE_ADDRESS, stake_address: null, quantity: '10' }],
+  });
+  const result = await runSnapshot(db, 'abcdefghjk', { now: new Date('2026-01-02T00:00:00Z'), fetchImpl });
+  assert.match(result.error || '', /No eligible holders.*1 below the minimum balance/);
 });
 
 test('runSnapshot retries failures and eventually gives up', async () => {

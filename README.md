@@ -196,8 +196,9 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
   lands without the site noticing is recognised from the chain, and a lane out of
   sync with the chain is repaired.
 - **Getting funds back:** the owner can reclaim (sweep the whole campaign wallet,
-  tokens and ADA, to the payout address fixed at creation) before claims open and
-  after they close plus 15 minutes. While claims are open it is refused. A
+  tokens and ADA, to the payout address fixed at creation) only before a snapshot
+  exists or after claims close plus 15 minutes. Once the snapshot is taken, including
+  before claims open, it is refused. A
   campaign without an end date can be ended by its owner after claims have been
   open 24 hours. If the website is unavailable,
   `node scripts/emergency-sweep.mjs <campaignId> [--send]` does the same from a

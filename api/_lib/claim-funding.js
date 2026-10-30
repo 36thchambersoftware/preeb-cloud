@@ -81,11 +81,16 @@ export function fundingRequirements(campaign) {
   };
 }
 
-export function evaluateFunding(requirements, balances) {
+/**
+ * `prepared` is true once the claim UTxOs have been set up. That only happens after the wallet held
+ * the full amount, and the setup transaction's fee (and later the claims themselves) take the balance
+ * below the original requirement, so a prepared campaign must not be reported as under-funded.
+ */
+export function evaluateFunding(requirements, balances, { prepared = false } = {}) {
   const hasTokens = balances.tokens >= requirements.tokens;
   const hasLovelace = balances.lovelace >= requirements.lovelace;
   let status = 'funded';
-  if (!hasTokens || !hasLovelace) {
+  if (!prepared && (!hasTokens || !hasLovelace)) {
     status = balances.tokens > 0n || balances.lovelace > 0n ? 'partial' : 'unfunded';
   }
   return {

@@ -357,7 +357,7 @@
     }
   }
 
-  // Taking the funds out: always possible before claims open and after they close.
+  // Taking the funds out: possible before a snapshot exists and after claims close, never in between.
   function appendReclaim(owner, campaign) {
     const section = el('div', 'claim-reclaim');
     section.appendChild(el('h4', null, 'Reclaim funds'));
@@ -372,7 +372,7 @@
     };
 
     // The wallet is only known to be empty once its balance has been read; any UTxO holds ADA.
-    const walletEmpty = campaign.funding ? BigInt(campaign.funding.lovelaceHeld) === 0n : false;
+    const walletEmpty = campaign.funding ? BigInt(campaign.funding.lovelaceHeld) === 0n : campaign.walletEmpty === true;
     const payout = campaign.payoutAddress ? shorten(campaign.payoutAddress, 14, 10) : 'your wallet';
 
     if (reclaim?.status === 'submitted' && reclaim.txHash) {
@@ -408,6 +408,43 @@
     owner.appendChild(section);
   }
 
+  // Shown from the moment the owner's funding transaction is sent until the claims are ready.
+  function fundingBanner(campaign, { received = false, claimsSetUp = false } = {}) {
+    const banner = el('div', 'claim-sent');
+    banner.setAttribute('role', 'status');
+    const icon = el('span', 'claim-sent__icon', '✓');
+    icon.setAttribute('aria-hidden', 'true');
+    const body = el('div', 'claim-sent__body');
+    let title = 'Funding sent!';
+    let text = 'Your transaction was submitted to the Cardano network. It usually confirms within a couple of minutes. '
+      + 'This page updates by itself, and claims get ready as soon as the funds arrive. There is nothing else you need to do.';
+    if (claimsSetUp) {
+      title = 'Funded and ready!';
+      const opens = campaign.claimStartsAt && new Date(campaign.claimStartsAt) > new Date()
+        ? ` Claims open ${new Date(campaign.claimStartsAt).toLocaleString()}.` : '';
+      text = `The campaign wallet holds everything it needs and the claim UTxOs are set up.${opens} There is nothing else you need to do.`;
+    } else if (received) {
+      title = 'Funding received!';
+      text = 'The campaign wallet now holds everything it needs. Setting up the claim UTxOs…';
+    }
+    body.appendChild(el('strong', 'claim-sent__title', title));
+    body.appendChild(el('p', null, text));
+    if (campaign.fundingTx?.txHash) {
+      const link = el('a', 'btn btn--outline btn--sm', 'View transaction');
+      link.href = explorerTx(campaign, campaign.fundingTx.txHash);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      body.appendChild(link);
+    }
+    banner.append(icon, body);
+    if (!claimsSetUp) {
+      const progress = el('div', 'claim-sent__progress');
+      progress.setAttribute('aria-label', 'In progress');
+      banner.appendChild(progress);
+    }
+    return banner;
+  }
+
   // Funding: by default the site builds the transaction and the owner's wallet signs it, so there is
   // nothing to type or copy. Sending the amounts by hand stays available underneath.
   function appendFunding(owner, campaign) {
@@ -416,20 +453,20 @@
     section.appendChild(el('h4', null, 'Fund the campaign'));
     const missingTokens = funding ? BigInt(funding.tokensRequired) - BigInt(funding.tokensHeld) : null;
     const missingLovelace = funding ? BigInt(funding.lovelaceRequired) - BigInt(funding.lovelaceHeld) : null;
-    section.appendChild(el('p', null, `The campaign needs ${formatTokens(campaign, funding?.tokensRequired ?? campaign.snapshot.totalAmount)} `
-      + `and a deposit of ${formatAmount(funding?.lovelaceRequired ?? 0, 6)} ADA for its ${campaign.lanes.count} claim UTxOs. `
-      + 'The ADA is returned to you in full when the campaign ends and you reclaim (only about 1 ADA of network fees is spent).'));
-    if (funding) section.appendChild(el('p', 'claim-help', `Currently in the campaign wallet: ${fundingLine(campaign)}.`));
+    const claimsSetUp = Boolean(campaign.lanes?.status) && campaign.lanes.status !== 'none';
+    const received = funding?.status === 'funded';
+    const sent = Boolean(campaign.fundingTx) && !received;
+    // Once the transaction is sent, the confirmation leads and the instructions are not repeated.
+    if (claimsSetUp || received || sent) {
+      section.appendChild(fundingBanner(campaign, { received, claimsSetUp }));
+    } else {
+      section.appendChild(el('p', null, `The campaign needs ${formatTokens(campaign, funding?.tokensRequired ?? campaign.snapshot.totalAmount)} `
+        + `and a deposit of ${formatAmount(funding?.lovelaceRequired ?? 0, 6)} ADA for its ${campaign.lanes.count} claim UTxOs. `
+        + 'The ADA is returned to you in full when the campaign ends and you reclaim (only about 1 ADA of network fees is spent).'));
+    }
+    if (funding && !claimsSetUp) section.appendChild(el('p', 'claim-help', `Currently in the campaign wallet: ${fundingLine(campaign)}.`));
 
-    if (campaign.fundingTx && funding?.status !== 'funded') {
-      const note = el('p', null, 'Your funding transaction was sent. Waiting for it to confirm… ');
-      const link = el('a', null, 'View transaction');
-      link.href = explorerTx(campaign, campaign.fundingTx.txHash);
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      note.appendChild(link);
-      section.appendChild(note);
-    } else if (funding && funding.status !== 'funded') {
+    if (!claimsSetUp && !sent && funding && !received) {
       const owes = [];
       if (missingTokens > 0n) owes.push(formatTokens(campaign, missingTokens));
       if (missingLovelace > 0n) owes.push(`${formatAmount(missingLovelace, 6)} ADA`);
@@ -439,6 +476,11 @@
       button.type = 'button';
       button.addEventListener('click', () => fundFromWallet(campaign, button, status));
       section.append(button, status);
+    }
+
+    if (claimsSetUp || received || sent) {
+      owner.appendChild(section);
+      return;
     }
 
     const manual = el('details', 'claim-fund__manual');
@@ -477,7 +519,7 @@
 
       say('Sending…');
       await request(`${API}/fund-submit?id=${campaign.id}`, { method: 'POST', body: JSON.stringify({ txHex: built.txHex, witnessSet }) });
-      say('Sent. Waiting for it to confirm…');
+      say('Sent!');
       liveNow();
     } catch (error) {
       const declined = error?.code === 2 || /declin|cancel|reject/i.test(error?.info || error?.message || '');
@@ -982,7 +1024,7 @@
       campaign.stats, campaign.snapshot, campaign.lanes, campaign.reclaim, campaign.reclaimed,
       campaign.reclaimEligibility, campaign.viewerIsOwner,
       campaign.funding && [campaign.funding.status, campaign.funding.tokensHeld, campaign.funding.lovelaceHeld],
-      campaign.fundingTx,
+      campaign.fundingTx, campaign.walletEmpty,
     ]);
   }
 
@@ -1109,10 +1151,20 @@
     const banner = field('form-status');
     clearFieldErrors();
     banner.hidden = !message;
-    banner.textContent = message || '';
     banner.classList.toggle('claim-message--error', kind === 'error');
     banner.classList.toggle('claim-message--success', kind === 'success');
+    banner.classList.toggle('claim-message--working', kind === 'working');
+    banner.replaceChildren();
     if (!message) return;
+    if (kind === 'working' || kind === 'success') {
+      // Progress and completion are the moments the owner is watching for, so they get a large banner.
+      const [title, ...rest] = Array.isArray(message) ? message : [message];
+      banner.appendChild(el('strong', 'claim-message__title', title));
+      if (rest.length) banner.appendChild(el('span', 'claim-message__detail', rest.join(' ')));
+      if (kind === 'working') banner.appendChild(el('span', 'claim-message__bar'));
+    } else {
+      banner.textContent = message;
+    }
 
     const target = fieldId ? field(FIELD_ALIASES[fieldId] || fieldId) : null;
     if (kind === 'error' && target) {
@@ -1303,6 +1355,7 @@
     const source = form.querySelector('input[name="source"]:checked').value;
     field('source-koios').hidden = source !== 'koios';
     field('source-json').hidden = source !== 'json';
+    field('min-balance-field').hidden = source !== 'koios';
 
     const modeSelect = field('distribution-mode');
     const manual = modeSelect.value === 'manual';
@@ -1337,7 +1390,7 @@
       distribution: { mode },
       snapshot: { source, at: readDate('snapshot-at') },
       filters: {
-        minBalance: stripCommas(field('min-balance').value),
+        minBalance: source === 'koios' ? stripCommas(field('min-balance').value) : '',
         excludeScripts: field('exclude-scripts').checked,
         exclude: field('exclude-list').value.split(/\s*\n\s*/).filter(Boolean),
       },
@@ -1425,11 +1478,11 @@
     }
 
     setSubmitting(true);
-    showFormStatus('info', 'Creating your campaign and reading the token from the chain…');
+    showFormStatus('working', ['Creating your campaign…', 'Reading the token from the chain and setting up the campaign wallet. This takes a few seconds, please keep this page open.']);
     try {
       const { campaign, snapshot } = await request(`${API}/campaigns`, { method: 'POST', body: JSON.stringify(buildPayload()) });
       const note = snapshot?.error ? ` The snapshot is not finished yet (${snapshot.error}); it will retry automatically.` : '';
-      showFormStatus('success', `Campaign created.${note} Taking you to its page…`);
+      showFormStatus('success', ['Campaign created!', `${note.trim()} Taking you to its page…`.trim()]);
       setTimeout(() => { window.location.href = `/claim/${campaign.id}`; }, note ? 2500 : 900);
     } catch (error) {
       const network = error instanceof TypeError;

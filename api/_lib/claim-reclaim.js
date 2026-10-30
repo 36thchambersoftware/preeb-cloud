@@ -25,7 +25,9 @@ const when = (date) => date.toISOString().replace('T', ' ').replace(/:\d\d\.\d+Z
 
 /**
  * Whether the owner can take the funds out right now. The rule: never while
- * holders can claim, always before claims open or after they have closed.
+ * holders can claim, which includes the time between the snapshot and the opening: once the
+ * snapshot is taken the campaign has been announced, so funds stay until claims have closed.
+ * Before a snapshot exists nothing has been promised, so the owner can always take funds back.
  */
 export function reclaimEligibility(campaign, now = new Date(), inFlight = 0) {
   // A campaign that has been swept is finished: claims can never open again.
@@ -35,7 +37,8 @@ export function reclaimEligibility(campaign, now = new Date(), inFlight = 0) {
   const start = campaign.claimStartsAt ? new Date(campaign.claimStartsAt) : null;
   const end = campaign.claimEndsAt ? new Date(campaign.claimEndsAt) : null;
 
-  if (!taken || (start && now < start)) return { allowed: true, reason: 'Claims have not opened, so nothing has been claimed.' };
+  if (!taken) return { allowed: true, reason: 'There is no snapshot yet, so nothing has been promised.' };
+  const notOpenYet = Boolean(start && now < start);
 
   if (end && now >= end) {
     const available = new Date(end.getTime() + RECLAIM_GRACE_MS);
@@ -53,11 +56,14 @@ export function reclaimEligibility(campaign, now = new Date(), inFlight = 0) {
       canEndAt: canEndAt.toISOString(),
       reason: now >= canEndAt
         ? 'Claims are open with no end date. End the claims first, then reclaim.'
-        : `Claims are open with no end date. You can end them from ${when(canEndAt)}, then reclaim.`,
+        : `Claims ${notOpenYet ? `open ${when(start)} with` : 'are open with'} no end date. You can end them from ${when(canEndAt)}, then reclaim.`,
     };
   }
 
-  return { allowed: false, availableAt: new Date(end.getTime() + RECLAIM_GRACE_MS).toISOString(), reason: `Claims are open until ${when(end)}. You can reclaim after they close.` };
+  const reason = notOpenYet
+    ? `Claims open ${when(start)} and run until ${when(end)}. You can reclaim after they close.`
+    : `Claims are open until ${when(end)}. You can reclaim after they close.`;
+  return { allowed: false, availableAt: new Date(end.getTime() + RECLAIM_GRACE_MS).toISOString(), reason };
 }
 
 /** Closes claims early. Holders always get at least 24 hours of open claims first. */

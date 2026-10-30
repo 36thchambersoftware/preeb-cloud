@@ -210,7 +210,8 @@ export function parseCampaignInput(body, { ownerStake, tokenInfo, holderToken = 
   }
 
   // The creator types a balance in whole tokens; the chain counts the smallest unit.
-  const minBalanceText = String(body.filters?.minBalance ?? '').replace(/,/g, '').trim();
+  // A minimum balance only means something for holders of a token; an uploaded list has no token to measure.
+  const minBalanceText = source === 'koios' ? String(body.filters?.minBalance ?? '').replace(/,/g, '').trim() : '';
   let minBalance = 0n;
   if (minBalanceText) {
     try {
@@ -455,6 +456,17 @@ export function isCampaignId(value) {
   return typeof value === 'string' && /^[a-z0-9]{10}$/.test(value);
 }
 
+function describeSkipped(skipped = {}) {
+  const reasons = [
+    [skipped.invalid, 'not valid addresses or amounts'],
+    [skipped.script, 'script addresses'],
+    [skipped.excluded, 'on the exclude list'],
+    [skipped.belowMinimum, 'below the minimum balance'],
+    [skipped.zeroAmount, 'would receive nothing'],
+  ].filter(([count]) => count > 0).map(([count, why]) => `${count} ${why}`);
+  return reasons.length ? ` Skipped: ${reasons.join(', ')}.` : '';
+}
+
 async function loadHolderRows(campaign, fetchImpl) {
   if (campaign.snapshot.source === 'json') return campaign.snapshot.rows || [];
   return fetchKoiosHolders({ ...campaign.tokenX, network: campaign.network }, fetchImpl);
@@ -479,13 +491,14 @@ export async function runSnapshot(db, campaignId, { now = new Date(), fetchImpl 
     const decimals = campaign.tokenY.decimals;
     const result = buildEntitlements({
       rows,
-      filters: campaign.filters,
+      // Campaigns created before this rule may carry a minimum from the token form; an uploaded list ignores it.
+      filters: campaign.snapshot.source === 'json' ? { ...campaign.filters, minBalance: '0' } : campaign.filters,
       distribution: campaign.distribution,
       decimals,
       excludeAddresses: [campaign.wallet.address],
     });
     if (result.entitlements.length === 0) {
-      throw new SnapshotError('No eligible holders were found for this campaign.');
+      throw new SnapshotError(`No eligible holders were found for this campaign.${describeSkipped(result.skipped)}`);
     }
 
     const laneCount = laneCountFor(result.entitlements.length, campaign.lanes?.target);

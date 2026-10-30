@@ -132,6 +132,32 @@ test('evaluateFunding reports unfunded, partial and funded wallets', () => {
   assert.equal(evaluateFunding(requirements, { tokens: 1500n, lovelace: requirements.lovelace }).status, 'funded');
 });
 
+test('a campaign whose claim UTxOs are set up is funded even though the setup fee came out of the deposit', async () => {
+  const requirements = fundingRequirements({ snapshot: { totalAmount: '1000' }, lanes: { count: 3 } });
+  const afterFee = { tokens: 1000n, lovelace: requirements.lovelace - 237_001n };
+  assert.equal(evaluateFunding(requirements, afterFee).status, 'partial');
+  assert.equal(evaluateFunding(requirements, afterFee, { prepared: true }).status, 'funded');
+
+  const policyId = 'a'.repeat(56);
+  const campaign = (laneStatus) => ({
+    wallet: { address: 'addr1x' },
+    network: 'mainnet',
+    tokenY: { policyId, assetNameHex: '' },
+    snapshot: { totalAmount: '1000' },
+    lanes: { count: 3, status: laneStatus },
+  });
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => [{ value: String(afterFee.lovelace), asset_list: [{ policy_id: policyId, asset_name: '', quantity: '1000' }] }],
+  });
+  const { readFunding } = await import('../api/_lib/claim-prepare.js');
+  assert.equal((await readFunding(campaign('ready'), fetchImpl)).funding.status, 'funded');
+  assert.equal((await readFunding(campaign('none'), fetchImpl)).funding.status, 'partial');
+  // Preparing is checked for real, since the campaign is already marked 'preparing' when it checks.
+  assert.equal((await readFunding(campaign('preparing'), fetchImpl, { checkingBeforePreparing: true })).funding.status, 'partial');
+});
+
 test('a proportional campaign asks for the full announced total, not the rounded-down shares', () => {
   const requirements = fundingRequirements({
     distribution: { mode: 'proportional', totalAmount: '106000000000' },

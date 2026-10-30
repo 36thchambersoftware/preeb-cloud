@@ -28,6 +28,30 @@
 .claim-message--error { border-color: rgba(255, 125, 125, 0.4); color: #ff9d9d; }
 .claim-message--success { border-color: rgba(46, 204, 113, 0.45); color: var(--color-green); }
 
+.claim-form__status.claim-message--working, .claim-form__status.claim-message--success {
+  position: sticky; display: grid; gap: 0.35rem; overflow: hidden; padding: 1.25rem 1.5rem 1.5rem;
+  border-width: 2px; border-radius: 12px; text-align: left;
+}
+.claim-form__status.claim-message--working {
+  border-color: var(--color-cyan); color: var(--color-text);
+  background: linear-gradient(135deg, rgba(60, 200, 200, 0.2), rgba(60, 200, 200, 0.06));
+  box-shadow: 0 0 0 4px rgba(60, 200, 200, 0.12), 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.claim-form__status.claim-message--success {
+  border-color: var(--color-green);
+  background: linear-gradient(135deg, rgba(46, 204, 113, 0.2), rgba(46, 204, 113, 0.06));
+  box-shadow: 0 0 0 4px rgba(46, 204, 113, 0.12), 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.claim-message__title { font-family: var(--font-heading); font-size: 1.4rem; line-height: 1.2; }
+.claim-message--working .claim-message__title { color: var(--color-cyan); }
+.claim-message__detail { color: var(--color-text-muted); }
+.claim-message__bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(60, 200, 200, 0.2); overflow: hidden; }
+.claim-message__bar::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--color-cyan);
+  animation: claim-sent-slide 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .claim-message__bar::after { animation: none; width: 100%; opacity: 0.6; } }
+
 .claim-note,
 .claim-empty { margin-top: 1.25rem; color: var(--color-text-muted); font-size: 0.9rem; }
 
@@ -333,6 +357,27 @@ details.claim-snapshot { display: block; border: 1px solid var(--color-border); 
 .claim-fund { display: grid; gap: 0.6rem; }
 .claim-fund h4 { margin: 0; }
 .claim-fund p { margin: 0; }
+.claim-sent {
+  position: relative; overflow: hidden; display: flex; gap: 1rem; align-items: flex-start;
+  padding: 1.1rem 1.25rem 1.4rem; border-radius: 12px;
+  border: 2px solid var(--color-green);
+  background: linear-gradient(135deg, rgba(46, 204, 113, 0.18), rgba(46, 204, 113, 0.06));
+  box-shadow: 0 0 0 4px rgba(46, 204, 113, 0.12);
+}
+.claim-sent__icon {
+  flex: none; display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: 50%;
+  background: var(--color-green); color: #07130e; font-size: 1.5rem; font-weight: 800;
+}
+.claim-sent__body { display: grid; gap: 0.5rem; justify-items: start; }
+.claim-sent__title { font-family: var(--font-heading); font-size: 1.35rem; color: var(--color-green); }
+.claim-sent__progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(46, 204, 113, 0.2); overflow: hidden; }
+.claim-sent__progress::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--color-green);
+  animation: claim-sent-slide 1.6s ease-in-out infinite;
+}
+@keyframes claim-sent-slide { from { left: -35%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .claim-sent__progress::after { animation: none; width: 100%; opacity: 0.6; } }
+
 .claim-fund__manual { border-top: 1px solid var(--color-border); padding-top: 0.6rem; }
 .claim-fund__manual summary { cursor: pointer; color: var(--color-text-muted); }
 .claim-fund__manual[open] summary { margin-bottom: 0.5rem; }
