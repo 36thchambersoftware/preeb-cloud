@@ -1,6 +1,7 @@
 import { applyCors, checkRateLimit, getClientIp, rejectRateLimited } from '../_lib/security.js';
 
 const KOIOS_BASE = 'https://api.koios.rest/api/v1';
+const MAX_POLICY_ASSETS = 300;
 
 // Only these Koios endpoints are ever called by script.js/profile.js. This
 // keeps the proxy from being usable as a generic, key-less Koios mirror for
@@ -88,6 +89,13 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Only the endpoint name is checked against the allowlist, so the path must be exactly that
+  // name. Extra segments or "." / ".." would let a request be rewritten to any other endpoint.
+  if (segments.length !== 1 || !/^[a-z0-9_]+$/i.test(segments[0])) {
+    res.status(400).json({ error: 'Invalid Koios path.' });
+    return;
+  }
+
   const endpointName = segments[0];
   if (!ALLOWED_ENDPOINTS.has(endpointName)) {
     res.status(403).json({ error: `Koios endpoint "${endpointName}" is not permitted through this proxy.` });
@@ -112,6 +120,11 @@ export default async function handler(req, res) {
       }
 
       const assets = await assetListResponse.json();
+      // One upstream call is made per asset, so very large policies are refused here.
+      if (Array.isArray(assets) && assets.length > MAX_POLICY_ASSETS) {
+        res.status(413).json({ error: `This policy has more than ${MAX_POLICY_ASSETS} assets. Use a holder list instead.` });
+        return;
+      }
       const quantitiesByAddress = new Map();
       const failedAssets = [];
       const requestIntervalMs = 160;

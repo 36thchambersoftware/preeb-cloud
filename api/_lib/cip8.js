@@ -1,5 +1,6 @@
 import nacl from 'tweetnacl';
 import { bech32 } from 'bech32';
+import { blake2b } from '@noble/hashes/blake2.js';
 import { decodeCbor } from './cbor.js';
 
 /**
@@ -47,6 +48,10 @@ function rewardAddressBytesToBech32(addressBytes) {
 }
 
 export function verifyCip8Signature({ signatureHex, keyHex, expectedPayload }) {
+  // Signatures and keys are a few hundred bytes; refuse anything larger before decoding.
+  if (String(signatureHex || '').length > 4096 || String(keyHex || '').length > 1024) {
+    throw new Error('Signature payload too large');
+  }
   const sigMessageBytes = Buffer.from(String(signatureHex || ''), 'hex');
   const keyBytes = Buffer.from(String(keyHex || ''), 'hex');
 
@@ -72,12 +77,25 @@ export function verifyCip8Signature({ signatureHex, keyHex, expectedPayload }) {
   }
   const addressBytes = Buffer.from(addressField);
 
+  // The signed address must be a key-hash stake (reward) address: header 0xe0/0xe1 plus a 28-byte hash.
+  if (addressBytes.length !== 29 || (addressBytes[0] >> 4) !== 14) {
+    throw new Error('Signed address must be a stake address');
+  }
+
   const coseKey = decodeCbor(keyBytes).value;
   const publicKeyField = coseKey instanceof Map ? coseKey.get(-2) : null;
   if (!publicKeyField) {
     throw new Error('Public key missing from COSE_Key');
   }
   const publicKeyBytes = Buffer.from(publicKeyField);
+  if (publicKeyBytes.length !== 32) throw new Error('Invalid public key');
+
+  // The signature only proves the signer holds *a* key. Binding that key to the stake
+  // address is what proves they hold *that wallet's* stake key.
+  const keyHash = Buffer.from(blake2b(publicKeyBytes, { dkLen: 28 }));
+  if (!keyHash.equals(addressBytes.subarray(1))) {
+    throw new Error('Signing key does not belong to the signed stake address');
+  }
 
   const expectedPayloadBytes = Buffer.from(String(expectedPayload || ''), 'utf8');
   const payloadBytes = payloadField != null ? Buffer.from(payloadField) : expectedPayloadBytes;

@@ -29,6 +29,7 @@ import {
   verifyClaimer,
 } from '../_lib/claim-claims.js';
 import { endClaims, reclaimEligibility, reclaimFunds } from '../_lib/claim-reclaim.js';
+import { buildFunding, submitFunding } from '../_lib/claim-fund.js';
 
 function getSegments(req) {
   const fromQuery = req.query?.path;
@@ -179,7 +180,7 @@ export default async function handler(req, res) {
     }
 
     // Vercel's catch-all only matches one path segment, so campaign actions take the id as a query parameter.
-    if (['retry-snapshot', 'snapshot', 'reclaim', 'end-claims'].includes(route)) {
+    if (['retry-snapshot', 'snapshot', 'reclaim', 'end-claims', 'fund-build', 'fund-submit'].includes(route)) {
       const id = String(req.query?.id || '');
       if (!isCampaignId(id)) {
         res.status(400).json({ error: 'A valid campaign id is required.' });
@@ -199,7 +200,7 @@ export default async function handler(req, res) {
         return;
       }
 
-      if (['retry-snapshot', 'reclaim', 'end-claims'].includes(route) && req.method === 'POST') {
+      if (['retry-snapshot', 'reclaim', 'end-claims', 'fund-build', 'fund-submit'].includes(route) && req.method === 'POST') {
         const db = await getDb();
         const existing = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: id }, { projection: { 'owner.stake': 1 } });
         if (!existing) {
@@ -209,6 +210,16 @@ export default async function handler(req, res) {
         const viewerStakes = readWalletSession(req);
         if (!viewerStakes.includes(existing.owner.stake)) {
           res.status(403).json({ error: 'Only the campaign owner can do this.' });
+          return;
+        }
+
+        if (route === 'fund-build' || route === 'fund-submit') {
+          const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          const full = await db.collection(CAMPAIGNS_COLLECTION).findOne({ _id: id }, { projection: { 'snapshot.rows': 0 } });
+          const result = route === 'fund-build'
+            ? await buildFunding(db, full, { address: String(body.address || ''), utxoHexes: body.utxos })
+            : await submitFunding(db, full, { txHex: body.txHex, witnessSetHex: body.witnessSet });
+          res.status(200).json(result);
           return;
         }
 

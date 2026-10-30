@@ -132,12 +132,13 @@ export function shouldUseSecureCookies(req) {
   return process.env.NODE_ENV === 'production';
 }
 
+// A same-site path only. Browsers silently drop tabs and newlines inside URLs, so "/\t/evil.com"
+// would otherwise become "//evil.com". Allowing only a strict character set rules out all of that.
 export function isSafeReturnTo(value) {
   return typeof value === 'string'
-    && value.startsWith('/')
-    && !value.startsWith('//')
-    && !value.includes('\\')
-    && !/[\r\n]/.test(value);
+    && value.length <= 300
+    && /^\/(?!\/)[A-Za-z0-9\-._~/?=&%#]*$/.test(value)
+    && !value.includes('..');
 }
 
 export function createOAuthState(returnTo, now = Date.now()) {

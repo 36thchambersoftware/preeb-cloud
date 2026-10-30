@@ -1,14 +1,64 @@
 {
   "functions": {
-    "api/claim/[...path].js": { "maxDuration": 60 }
+    "api/claim/[...path].js": {
+      "maxDuration": 60
+    }
   },
   "rewrites": [
-    { "source": "/profile", "destination": "/profile.html" },
-    { "source": "/profile/:stake", "destination": "/profile.html" },
-    { "source": "/airdrop", "destination": "/airdrop.html" },
-    { "source": "/claim", "destination": "/claim.html" },
-    { "source": "/claim/:id", "destination": "/claim.html" },
-    { "source": "/leaderboard", "destination": "/leaderboard.html" },
-    { "source": "/wall", "destination": "/wall.html" }
+    {
+      "source": "/profile",
+      "destination": "/profile.html"
+    },
+    {
+      "source": "/profile/:stake",
+      "destination": "/profile.html"
+    },
+    {
+      "source": "/airdrop",
+      "destination": "/airdrop.html"
+    },
+    {
+      "source": "/claim",
+      "destination": "/claim.html"
+    },
+    {
+      "source": "/claim/:id",
+      "destination": "/claim.html"
+    },
+    {
+      "source": "/leaderboard",
+      "destination": "/leaderboard.html"
+    },
+    {
+      "source": "/wall",
+      "destination": "/wall.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.koios.rest https://api.handle.me; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        }
+      ]
+    }
   ]
 }

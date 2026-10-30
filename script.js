@@ -426,11 +426,9 @@
   async function loadCardanoSerializationLib() {
     if (CSL) return CSL;
 
-    const candidates = [
-      'https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1',
-      'https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1?bundle',
-      'https://jspm.dev/@emurgo/cardano-serialization-lib-asmjs',
-    ];
+    // Pinned and served from this site; never from a third-party CDN, because this code builds the
+    // transactions a user signs.
+    const candidates = ['/vendor/cardano-serialization-lib-asmjs-12.1.1/cardano_serialization_lib.js'];
 
     let lastErr;
     for (const url of candidates) {

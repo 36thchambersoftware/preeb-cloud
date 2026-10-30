@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/claim.css?v=8" />
+  <link rel="stylesheet" href="/claim.css?v=10" />
 </head>
 <body>
   <div data-site-navigation></div>
@@ -127,7 +127,18 @@
           </fieldset>
 
           <fieldset class="claim-fieldset">
-            <legend>6. Claim period</legend>
+            <legend>6. Claim speed</legend>
+            <label class="claim-label" for="claim-utxos">UTxOs for claims: <strong id="claim-utxos-value">20</strong></label>
+            <input id="claim-utxos" type="range" min="20" max="100" step="5" value="20" />
+            <p class="claim-help">Every claim uses up one UTxO in the campaign wallet for a moment, so more UTxOs means more people can claim at the same time. With 100 UTxOs and 100 eligible wallets, nobody ever waits for anyone else. Fewer UTxOs keeps the deposit smaller, but holders who share one take turns. If fewer wallets qualify than the number you pick, each wallet simply gets its own UTxO.</p>
+            <div class="claim-deposit" aria-live="polite">
+              <div>Deposit to send with the tokens: <strong id="claim-deposit-amount">31.5 ADA</strong></div>
+              <p class="claim-help" id="claim-deposit-note">This ADA is <strong>returned to you</strong> after the campaign ends, when you reclaim. Only about 1 ADA of network fees is spent.</p>
+            </div>
+          </fieldset>
+
+          <fieldset class="claim-fieldset">
+            <legend>7. Claim period</legend>
             <div class="claim-row">
               <div>
                 <label class="claim-label" for="claim-start">Claims open (optional)</label>
@@ -142,7 +153,7 @@
           </fieldset>
 
           <fieldset class="claim-fieldset">
-            <legend>7. Picture</legend>
+            <legend>8. Picture</legend>
             <p class="claim-help">We look for the token artwork on chain (CIP-68, then CIP-25 mint metadata, then the token registry). Pick one, or paste your own link.</p>
             <div class="claim-images" id="image-choices"></div>
             <label class="claim-label" for="image-url">Or paste an image URL (https:// or ipfs://)</label>
@@ -156,7 +167,7 @@
   </main>
 
   <script src="/navigation.js?v=6"></script>
-  <script src="/claim.js?v=11"></script>
+  <script src="/claim.js?v=13"></script>
   <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

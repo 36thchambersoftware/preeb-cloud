@@ -49,6 +49,11 @@ test('OAuth state binds a safe local return path to the browser cookie', () => {
   assert.equal(verifyOAuthState(state, `${state}x`, now), null);
   assert.equal(isSafeReturnTo('//evil.example'), false);
   assert.equal(isSafeReturnTo('/profile'), true);
+  assert.equal(isSafeReturnTo('/claim/abcdefghjk?x=1'), true);
+  // Whitespace and control characters that browsers strip would turn these into protocol-relative URLs.
+  for (const sneaky of ['/\t/evil.example', '/\n/evil.example', '/ /evil.example', '/\u0000/evil.example', '/../evil', '/\\evil.example', 'https://evil.example', '/%0a/evil']) {
+    assert.equal(isSafeReturnTo(sneaky), sneaky === '/%0a/evil', sneaky);
+  }
 });
 
 test('unsafe OAuth return URLs are replaced with the profile path', () => {

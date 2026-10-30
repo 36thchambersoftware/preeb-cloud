@@ -408,6 +408,85 @@
     owner.appendChild(section);
   }
 
+  // Funding: by default the site builds the transaction and the owner's wallet signs it, so there is
+  // nothing to type or copy. Sending the amounts by hand stays available underneath.
+  function appendFunding(owner, campaign) {
+    const funding = campaign.funding;
+    const section = el('div', 'claim-fund');
+    section.appendChild(el('h4', null, 'Fund the campaign'));
+    const missingTokens = funding ? BigInt(funding.tokensRequired) - BigInt(funding.tokensHeld) : null;
+    const missingLovelace = funding ? BigInt(funding.lovelaceRequired) - BigInt(funding.lovelaceHeld) : null;
+    section.appendChild(el('p', null, `The campaign needs ${formatTokens(campaign, funding?.tokensRequired ?? campaign.snapshot.totalAmount)} `
+      + `and a deposit of ${formatAmount(funding?.lovelaceRequired ?? 0, 6)} ADA for its ${campaign.lanes.count} claim UTxOs. `
+      + 'The ADA is returned to you in full when the campaign ends and you reclaim (only about 1 ADA of network fees is spent).'));
+    if (funding) section.appendChild(el('p', 'claim-help', `Currently in the campaign wallet: ${fundingLine(campaign)}.`));
+
+    if (campaign.fundingTx && funding?.status !== 'funded') {
+      const note = el('p', null, 'Your funding transaction was sent. Waiting for it to confirm… ');
+      const link = el('a', null, 'View transaction');
+      link.href = explorerTx(campaign, campaign.fundingTx.txHash);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      note.appendChild(link);
+      section.appendChild(note);
+    } else if (funding && funding.status !== 'funded') {
+      const owes = [];
+      if (missingTokens > 0n) owes.push(formatTokens(campaign, missingTokens));
+      if (missingLovelace > 0n) owes.push(`${formatAmount(missingLovelace, 6)} ADA`);
+      const status = el('p', 'claim-help');
+      status.setAttribute('aria-live', 'polite');
+      const button = el('button', 'btn btn--primary', `Fund from my wallet${owes.length ? ` (${owes.join(' + ')})` : ''}`);
+      button.type = 'button';
+      button.addEventListener('click', () => fundFromWallet(campaign, button, status));
+      section.append(button, status);
+    }
+
+    const manual = el('details', 'claim-fund__manual');
+    manual.appendChild(el('summary', null, 'Or send it yourself'));
+    manual.appendChild(el('p', null, `Send ${formatTokens(campaign, funding?.tokensRequired ?? campaign.snapshot.totalAmount)} `
+      + `and at least ${formatAmount(funding?.lovelaceRequired ?? 0, 6)} ADA to the campaign wallet from any wallet or exchange. `
+      + 'Funds sent from somewhere other than your connected wallet are still returned to your reclaim address.'));
+    manual.appendChild(el('code', 'claim-address', campaign.walletAddress));
+    manual.appendChild(copyButton(campaign.walletAddress, 'Copy wallet address'));
+    section.appendChild(manual);
+    owner.appendChild(section);
+  }
+
+  async function fundFromWallet(campaign, button, status) {
+    const nav = window.PreebNavigation;
+    const api = nav.getWalletApi?.();
+    const label = button.textContent;
+    const say = (text, isError = false) => {
+      status.textContent = text;
+      status.classList.toggle('claim-warning', isError);
+    };
+    button.disabled = true;
+    try {
+      if (!api) throw new Error('Reconnect your wallet from the header first.');
+      const networkId = await api.getNetworkId();
+      if ((campaign.network === 'mainnet') !== (networkId === 1)) throw new Error(`Switch your wallet to ${campaign.network} to fund this campaign.`);
+
+      say('Preparing the funding transaction…');
+      const utxos = (await api.getUtxos()) || [];
+      const address = nav.addressHexToBech32(await api.getChangeAddress());
+      const built = await request(`${API}/fund-build?id=${campaign.id}`, { method: 'POST', body: JSON.stringify({ address, utxos }) });
+
+      const wallet = nav.getConnectedWallet();
+      say(`Approve the transaction in ${wallet?.label || 'your wallet'}: it sends ${formatTokens(campaign, built.tokens)} and ${formatAmount(built.lovelace, 6)} ADA to the campaign wallet, plus a network fee of about ${(Number(built.fee) / 1e6).toFixed(2)} ADA.`);
+      const witnessSet = await api.signTx(built.txHex, false);
+
+      say('Sending…');
+      await request(`${API}/fund-submit?id=${campaign.id}`, { method: 'POST', body: JSON.stringify({ txHex: built.txHex, witnessSet }) });
+      say('Sent. Waiting for it to confirm…');
+      liveNow();
+    } catch (error) {
+      const declined = error?.code === 2 || /declin|cancel|reject/i.test(error?.info || error?.message || '');
+      say(declined ? 'Cancelled in your wallet. Nothing was sent.' : (error.message || 'The funding transaction could not be completed.'), !declined);
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+
   // Only the campaign's owner, with the owner's wallet connected, gets the controls.
   function buildOwnerPanel(campaign) {
     if (!campaign.viewerIsOwner) return null;
@@ -435,12 +514,7 @@
       return owner;
     }
     if (campaign.snapshot.status === 'taken' && campaign.phase !== 'claiming' && campaign.phase !== 'preparing') {
-      owner.appendChild(el('p', null, `Send ${formatTokens(campaign, campaign.funding?.tokensRequired ?? campaign.snapshot.totalAmount)} `
-        + `and at least ${formatAmount(campaign.funding?.lovelaceRequired ?? 0, 6)} ADA to the campaign wallet. `
-        + 'The ADA is a deposit for the claim lanes and comes back to you when you reclaim.'));
-      owner.appendChild(el('code', 'claim-address', campaign.walletAddress));
-      owner.appendChild(copyButton(campaign.walletAddress, 'Copy wallet address'));
-      owner.appendChild(el('p', null, `Currently held: ${fundingLine(campaign)}.`));
+      appendFunding(owner, campaign);
     }
     appendReclaim(owner, campaign);
     return owner;
@@ -854,6 +928,9 @@
     if (campaign.snapshot.eligibleCount !== null) {
       facts.appendChild(fact('Eligible wallets', String(campaign.snapshot.eligibleCount)));
     }
+    if (campaign.lanes?.count) {
+      facts.appendChild(fact('Claim UTxOs', `${campaign.lanes.count} (set by the campaign administrator; up to ${campaign.lanes.count} people can claim at once)`));
+    }
 
     if (campaign.tokenX) {
       const holderName = campaign.tokenX.name || campaign.tokenX.ticker || 'the holder token';
@@ -905,6 +982,7 @@
       campaign.stats, campaign.snapshot, campaign.lanes, campaign.reclaim, campaign.reclaimed,
       campaign.reclaimEligibility, campaign.viewerIsOwner,
       campaign.funding && [campaign.funding.status, campaign.funding.tokensHeld, campaign.funding.lovelaceHeld],
+      campaign.fundingTx,
     ]);
   }
 
@@ -912,6 +990,7 @@
     const pendingClaim = snapshotViews.get(campaign.id)?.state.lastMine === 'reserved';
     if (campaign.reclaim?.status === 'submitted' || pendingClaim) return 4000;
     if (['preparing', 'ready-to-prepare'].includes(campaign.phase)) return 4000;
+    if (campaign.fundingTx && campaign.funding?.status !== 'funded') return 4000;
     if (campaign.status === 'active') return 8000;
     if (campaign.status === 'closed') return 20_000;
     return 10_000;
@@ -1209,6 +1288,17 @@
     }
   }
 
+  // Mirrors LANE_LOVELACE_ESTIMATE and FUNDING_FEE_BUFFER in api/_lib/claim-funding.js (a test checks they agree).
+  const UTXO_DEPOSIT_LOVELACE = 1_500_000;
+  const DEPOSIT_FEE_BUFFER_LOVELACE = 1_500_000;
+
+  function syncClaimUtxos() {
+    const count = Number(field('claim-utxos').value);
+    field('claim-utxos-value').textContent = String(count);
+    const lovelace = count * UTXO_DEPOSIT_LOVELACE + DEPOSIT_FEE_BUFFER_LOVELACE;
+    field('claim-deposit-amount').textContent = `${(lovelace / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 1 })} ADA`;
+  }
+
   function syncFormMode() {
     const source = form.querySelector('input[name="source"]:checked').value;
     field('source-koios').hidden = source !== 'koios';
@@ -1251,6 +1341,7 @@
         excludeScripts: field('exclude-scripts').checked,
         exclude: field('exclude-list').value.split(/\s*\n\s*/).filter(Boolean),
       },
+      claimUtxos: Number(field('claim-utxos').value),
       claimStartsAt: readDate('claim-start'),
       claimEndsAt: readDate('claim-end'),
       image: imageUrl ? { url: imageUrl } : null,
@@ -1405,6 +1496,8 @@
       if (create.chosenAsset !== null) lookupGiveaway();
     });
     field('x-policy').addEventListener('input', debounce(lookupHolders, 500));
+    field('claim-utxos').addEventListener('input', syncClaimUtxos);
+    syncClaimUtxos();
     field('min-balance').addEventListener('input', () => formatNumberInput(field('min-balance'), true));
     field('distribution-amount').addEventListener('input', () => formatNumberInput(field('distribution-amount'), true));
     field('image-url').addEventListener('input', () => {

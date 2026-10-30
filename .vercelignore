@@ -1,0 +1,6 @@
+# Not part of the deployed site: keeps internal files from being served as static assets.
+tests
+scripts
+.github
+.vscode
+README.md

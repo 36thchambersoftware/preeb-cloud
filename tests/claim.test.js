@@ -225,6 +225,18 @@ test('parseCampaignInput builds a campaign and enforces the owner payout address
   assert.equal(parsed.distribution.amountPerHolder, '1000');
   assert.equal(parsed.snapshot.scheduledFor.getTime(), now.getTime());
 
+  assert.equal(parseCampaignInput(baseBody({ claimEndsAt: '2026-02-01T00:00:00Z' }), {
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
+  }).claimUtxos, 20);
+  assert.equal(parseCampaignInput(baseBody({ claimUtxos: 100, claimEndsAt: '2026-02-01T00:00:00Z' }), {
+    ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
+  }).claimUtxos, 100);
+  for (const bad of [19, 101, 25.5, 'lots', -5]) {
+    assert.throws(() => parseCampaignInput(baseBody({ claimUtxos: bad, claimEndsAt: '2026-02-01T00:00:00Z' }), {
+      ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
+    }), /between 20 and 100/);
+  }
+
   assert.throws(() => parseCampaignInput(baseBody({ payoutAddress: ENTERPRISE_ADDRESS }), {
     ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
   }), ClaimInputError);
@@ -236,7 +248,7 @@ test('parseCampaignInput builds a campaign and enforces the owner payout address
   }), /at least 24 hours/);
   assert.throws(() => parseCampaignInput(baseBody({ image: { url: 'http://x.test/a.png' } }), {
     ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
-  }), /https:\/\/, ipfs:\/\/ or ar:\/\//);
+  }), /ipfs:\/\/, ar:\/\/ or a link through a public IPFS or Arweave gateway/);
   assert.throws(() => parseCampaignInput(baseBody({ distribution: { mode: 'manual' } }), {
     ownerStake: OWNER_STAKE, tokenInfo: TOKEN_INFO, holderToken: HOLDER_TOKEN, now, network: 'mainnet',
   }), /uploaded holder list/);
@@ -312,7 +324,14 @@ test('normalizeImageUrl only allows https and ipfs links', () => {
     'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa',
   );
   assert.equal(normalizeImageUrl('QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa/a.png'.split('/')[0]), 'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa');
-  assert.equal(normalizeImageUrl('https://example.com/a.png'), 'https://example.com/a.png');
+  // Arbitrary web hosts could track viewers; public IPFS/Arweave gateways are accepted and normalized.
+  assert.throws(() => normalizeImageUrl('https://example.com/a.png'), /gateway/);
+  assert.throws(() => normalizeImageUrl('https://tracker.example/ipfs/QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa'), /gateway/);
+  assert.equal(
+    normalizeImageUrl('https://ipfs.io/ipfs/QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa/a.png'),
+    'ipfs://QmcSJZWbpueNeejdUsWRmT9MeJZX8d9AQhSm4AvNjzX6qa/a.png',
+  );
+  assert.equal(normalizeImageUrl(`https://arweave.net/${'a'.repeat(43)}`), `ar://${'a'.repeat(43)}`);
   assert.throws(() => normalizeImageUrl('javascript:alert(1)'));
   assert.equal(normalizeImageUrl(''), null);
 });
@@ -425,6 +444,17 @@ test('runSnapshot stores one entitlement per holder and drops the uploaded list'
 
   const again = await runSnapshot(db, 'abcdefghjk', { now: new Date('2026-01-02T00:00:00Z') });
   assert.equal(again.ran, false);
+});
+
+test('a campaign with a chosen UTxO count gives every wallet its own when there are enough', async () => {
+  process.env.CLAIM_WALLET_KEY_SECRET = process.env.CLAIM_WALLET_KEY_SECRET || 'test-claim-wallet-secret-0123456789abcdef';
+  const db = createClaimDb(snapshotCampaign({ lanes: { status: 'none', count: 0, target: 40 } }));
+  await runSnapshot(db, 'abcdefghjk', { now: new Date('2026-01-02T00:00:00Z') });
+
+  // Two eligible wallets are fewer than the 40 chosen, so each one has a UTxO to itself.
+  assert.equal(db.campaigns[0].lanes.count, 2);
+  assert.deepEqual(db.entitlements.map((row) => row.lane).sort(), [0, 1]);
+  assert.ok(db.entitlements.every((row) => typeof row.seal === 'string'));
 });
 
 test('runSnapshot retries failures and eventually gives up', async () => {

@@ -25,6 +25,10 @@ const CID_RE = /^(Qm[1-9A-HJ-NP-Za-km-z]{44,}|b[a-z2-7]{50,}|z[1-9A-HJ-NP-Za-km-
 
 export class TokenInfoError extends Error {}
 
+const IPFS_GATEWAY_HOSTS = new Set([
+  'ipfs.io', 'dweb.link', 'gateway.pinata.cloud', 'ipfs.filebase.io', 'nftstorage.link', 'w3s.link', 'cloudflare-ipfs.com',
+]);
+
 export function registryImageRef(policyId, assetNameHex) {
   return `registry:${policyId}.${assetNameHex}`;
 }
@@ -58,9 +62,17 @@ export function normalizeImageRef(value) {
     throw new TokenInfoError('The image link is not valid.');
   }
   if (parsed.protocol !== 'https:') {
-    throw new TokenInfoError('Image links must start with https://, ipfs:// or ar://.');
+    throw new TokenInfoError('Image links must be ipfs://, ar:// or a link through a public IPFS or Arweave gateway.');
   }
-  return parsed.toString();
+
+  // Arbitrary web hosts are refused: whoever runs one sees the IP address of everyone who views
+  // the campaign. Public gateways are fine; the content is addressed by hash, not by host.
+  const gatewayPath = parsed.pathname.match(/^\/ipfs\/(.+)$/);
+  if (IPFS_GATEWAY_HOSTS.has(parsed.hostname) && gatewayPath) return normalizeImageRef(`ipfs://${gatewayPath[1]}`);
+  if (parsed.hostname === 'arweave.net' && /^\/[A-Za-z0-9_-]{43}(\/[A-Za-z0-9._-]+)*$/.test(parsed.pathname)) {
+    return normalizeImageRef(`ar:/${parsed.pathname}`);
+  }
+  throw new TokenInfoError('Image links must be ipfs://, ar:// or a link through a public IPFS or Arweave gateway.');
 }
 
 /** Every URL worth trying for an image reference, best first. */

@@ -99,7 +99,7 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
 - **API:** `GET/POST /api/claim/campaigns`, `GET /api/claim/<id>`,
   `GET /api/claim/snapshot?id=<id>` (the public snapshot table), `GET /api/claim/token-info`,
   `POST /api/claim/claim-challenge|claim-start|claim-finish?id=<id>` (claiming),
-  `POST /api/claim/retry-snapshot|reclaim|end-claims?id=<id>` (owner only), and
+  `POST /api/claim/retry-snapshot|reclaim|end-claims|fund-build|fund-submit?id=<id>` (owner only), and
   `POST /api/claim/run-snapshots` (cron only).
 - **Token details come from the chain:** the server looks up the token when a
   campaign is created and ignores any decimals or ticker sent by the browser.
@@ -109,19 +109,35 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
   `/api/claim/token-image`, raster formats only). `ipfs://` links are tried
   against several gateways, and `ar://` and bare CIDs are understood. If the
   creator picks nothing, the first artwork found is used.
-- **Funding:** after the snapshot the owner sends the total token amount plus a
-  small ADA deposit (about 2 ADA per lane, refundable) to the campaign wallet.
+- **Funding:** after the snapshot the owner funds the campaign wallet with the total
+  token amount plus a refundable ADA deposit (1.5 ADA per claim UTxO plus 1.5 ADA for
+  fees). The default is **Fund from my wallet**: the site builds the transaction from the
+  owner's connected wallet (`POST /api/claim/fund-build`), sending only what is still
+  missing, the wallet signs it, and the site forwards it (`fund-submit`). Both routes
+  are owner-only. The server re-reads the owner's UTxOs from the chain, refuses any
+  transaction that pays anyone but the campaign wallet and the owner's own address, adds
+  no signature of its own, and holds back a second transaction while the first is still
+  confirming. Sending the amounts by hand stays available under "Or send it yourself".
   Viewing a campaign re-reads the wallet from Koios (cached for 30 seconds).
 - **Automatic:** nothing needs a button. Once the wallet is fully funded, the next
   refresh (a page view or the scheduler's `run-snapshots` call) splits it into
   lanes by itself, and claims and reclaims are confirmed as they land on chain.
   Open pages update themselves too: every few seconds while something is in
   flight, and they pause while the tab is hidden.
-- **Lanes:** one claim spends and recreates a wallet UTxO, so a single UTxO would
-  allow one claim at a time. Preparing splits the wallet in one
-  transaction into up to 20 lanes, each holding exactly what its claimants are
-  owed. A claimant's lane is a hash of their snapshot key. The campaign is
-  ready once that transaction is confirmed.
+- **Claim UTxOs (lanes in the code):** one claim spends and recreates a wallet UTxO, so
+  a single UTxO would allow one claim at a time. The owner picks 20-100 UTxOs on the
+  create form (default 20) and sees the deposit it implies: 1.5 ADA per UTxO plus 1.5
+  ADA for fees, 31.5 ADA for 20 and 151.5 ADA for 100. The ADA is returned when the
+  campaign ends and the owner reclaims it (measured in a simulated ledger: about 1 ADA
+  of fees is lost at 100 UTxOs). One transaction splits the wallet into that many UTxOs,
+  each holding exactly what its claimants are owed. With fewer eligible wallets than
+  chosen, every wallet gets its own UTxO and nobody waits; otherwise wallets are spread
+  evenly (the assignment is stored on the entitlement and sealed) and wallets sharing a
+  UTxO take turns, being told "Waiting for a free UTxO" with the administrator's setting.
+  Campaigns created before the choice existed keep their hash-based assignment. 100
+  UTxOs is the ceiling because the setup transaction is about 10.8 KB of the 16 KB
+  limit with the longest possible asset name. The campaign is ready once that
+  transaction has 3 confirmations.
 
 - **Funding wallet:** each campaign gets its own enterprise wallet. Its seed is
   stored in `claim_wallets`, encrypted with AES-256-GCM using
@@ -164,8 +180,21 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
   lane, builds one transaction and signs it with the campaign wallet, the holder
   signs it in their wallet, and the server submits it. The holder spends only the
   network fee: the ADA that carries the tokens is their own and comes back in the
-  same transaction. A transaction is valid for 5 minutes, so an abandoned attempt
-  frees its lane after that. Only one claim per lane is in flight at a time.
+  same transaction. A transaction is valid for 3 minutes, so an abandoned attempt
+  frees its lane after that. Only one claim per lane is in flight at a time. A claim
+  record is written before anything is reserved, so a crash cannot leave a lane
+  stuck, and a wallet whose last 4 attempts within 6 hours all expired unsigned is
+  paused. Claims and lane splits count as final after 3 confirmations; a claim
+  that is rolled back by the chain is undone automatically.
+- **What the campaign key will sign:** the campaign wallet's signature is valid for
+  every UTxO at its address, so claim transactions are built only from UTxOs the
+  server re-reads from the chain (the wallet only nominates references) at addresses
+  of the claiming stake, and are checked against an exact allow-list (inputs,
+  outputs, no certificates, withdrawals or minting) before signing. Ownership of a
+  stake address is proven by a CIP-8 signature whose key must hash to that stake
+  address. An unsigned claim is never released before its expiry, a claim that
+  lands without the site noticing is recognised from the chain, and a lane out of
+  sync with the chain is repaired.
 - **Getting funds back:** the owner can reclaim (sweep the whole campaign wallet,
   tokens and ADA, to the payout address fixed at creation) before claims open and
   after they close plus 15 minutes. While claims are open it is refused. A
@@ -175,6 +204,17 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
   machine that has the environment variables. Funds are only recoverable while
   `CLAIM_WALLET_KEY_SECRET` and the database (`claim_wallets`) both survive, so
   back both up.
+- **Integrity seals:** the fields that decide where funds may go (wallet address,
+  owner, payout address, network, token) and every entitlement amount carry an HMAC
+  made with a key derived from `CLAIM_WALLET_KEY_SECRET` (`api/_lib/claim-seal.js`).
+  The server refuses to sign, sweep or release funds when a seal does not match, so
+  write access to MongoDB alone cannot redirect funds. Campaigns created before
+  seals existed are sealed from their current values the first time they are used.
+  Lane documents are not sealed.
+- **Platform limits:** 5 campaigns per owner, 30 per hour site-wide. Artwork must be
+  `ipfs://`, `ar://`, a public IPFS/Arweave gateway link, or the registry logo;
+  other web hosts are ignored. Setting `listed: false` on a campaign document hides
+  it from `/claim`.
 - **Owner:** creating a campaign requires a wallet verified in this browser
   (the signed wallet-session cookie). The reclaim address must be a base
   address of that same wallet.
@@ -183,6 +223,18 @@ funding checks, claim lanes, the claim transaction and the owner reclaim.
 - **MongoDB access:** the database user needs read/write and index access on
   `claim_campaigns`, `claim_wallets`, `claim_entitlements`, `claim_lanes` and
   `claim_claims`.
+
+## Site hardening
+
+- `vercel.json` sets a Content-Security-Policy (scripts from this origin only),
+  `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
+- The Cardano serialization library the browser needs is vendored in
+  `vendor/cardano-serialization-lib-asmjs-12.1.1/` (about 39 MB, asm.js build,
+  MIT) rather than loaded from a CDN. Bump it deliberately.
+- `.vercelignore` keeps tests, scripts and workflow files off the deployed site.
+- `/api/koios/<endpoint>` allows a single endpoint segment and caps `policy_holders`
+  at 300 assets. `GET /api/profile` only returns linked wallets to the owner's own
+  verified session and never returns the Discord ID.
 
 Run the tests with `node --test "tests/*.test.js"`.
 

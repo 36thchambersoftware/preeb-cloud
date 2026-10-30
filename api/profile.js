@@ -116,21 +116,14 @@ export default async function handler(req, res) {
         }
       }
 
-      if (!doc) {
-        res.status(200).json({
-          primaryStake: stake,
-          wallets: [stake],
-          discordId: null,
-          discordLinked: false,
-        });
-        return;
-      }
-
+      // Which wallets someone has linked, and to which Discord account, is private. It is only
+      // shown to a browser that has verified ownership of this wallet; everyone else sees the
+      // wallet alone and whether Discord is linked.
+      const isOwner = readWalletSession(req).includes(stake);
       res.status(200).json({
         primaryStake: stake,
-        wallets: Object.keys(doc.wallets?.cardano || {}),
-        discordId: doc.discordId || null,
-        discordLinked: Boolean(doc.discordId),
+        wallets: doc && isOwner ? Object.keys(doc.wallets?.cardano || {}) : [stake],
+        discordLinked: Boolean(doc?.discordId),
       });
       return;
     }

@@ -245,6 +245,15 @@
 .claim-form textarea:focus,
 .claim-form select:focus { outline: 2px solid var(--color-cyan); outline-offset: 1px; }
 
+.claim-form input[type="range"] { padding: 0; accent-color: var(--color-cyan); }
+.claim-deposit {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+.claim-deposit .claim-help { margin: 0.35rem 0 0; }
 .claim-help { color: var(--color-text-muted); font-size: 0.85rem; }
 .claim-help a { color: var(--color-cyan); }
 .claim-check { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; color: var(--color-text-muted); font-size: 0.85rem; }
@@ -320,3 +329,10 @@ details.claim-snapshot { display: block; border: 1px solid var(--color-border); 
 .claim-mine__status.claim-warning { color: var(--color-gold); }
 
 .claim-card .claim-card__status { background: rgba(10, 14, 26, 0.78); border: 1px solid currentColor; }
+
+.claim-fund { display: grid; gap: 0.6rem; }
+.claim-fund h4 { margin: 0; }
+.claim-fund p { margin: 0; }
+.claim-fund__manual { border-top: 1px solid var(--color-border); padding-top: 0.6rem; }
+.claim-fund__manual summary { cursor: pointer; color: var(--color-text-muted); }
+.claim-fund__manual[open] summary { margin-bottom: 0.5rem; }

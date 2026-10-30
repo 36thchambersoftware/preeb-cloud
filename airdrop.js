@@ -188,7 +188,7 @@
   }
 
   async function loadCardanoSerializationLib() {
-    const imported = await import('https://esm.sh/@emurgo/cardano-serialization-lib-asmjs@12.1.1?bundle');
+    const imported = await import('/vendor/cardano-serialization-lib-asmjs-12.1.1/cardano_serialization_lib.js');
     return imported?.default?.TransactionUnspentOutput ? imported.default : imported;
   }
 

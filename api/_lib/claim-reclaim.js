@@ -4,6 +4,7 @@ import {
   WALLETS_COLLECTION,
 } from './claim-campaign.js';
 import {
+  FINALITY_CONFIRMATIONS,
   fetchAddressUtxos,
   fetchConfirmations,
   fetchProtocolParams,
@@ -12,6 +13,7 @@ import {
 import { attachWalletWitness, buildSweepTransaction, loadCsl } from './claim-funding.js';
 import { countInFlightClaims, settleClaims } from './claim-claims.js';
 import { signWithClaimWallet } from './claim-wallet.js';
+import { ensureCampaignSealed } from './claim-integrity.js';
 
 /** After claims close, pending claim transactions get this long to land before a sweep is allowed. */
 export const RECLAIM_GRACE_MS = 15 * 60 * 1000;
@@ -79,9 +81,9 @@ export async function settleReclaim(db, campaign, { now = new Date(), fetchImpl 
   if (reclaim?.status !== 'submitted' || !reclaim.txHash) return null;
 
   const confirmations = await fetchConfirmations([reclaim.txHash], campaign.network, fetchImpl);
-  if (!(confirmations.get(reclaim.txHash) > 0)) {
+  if (!(confirmations.get(reclaim.txHash) >= FINALITY_CONFIRMATIONS)) {
     // A sweep that never reached the chain can be retried once it is clearly stale.
-    if (now.getTime() - new Date(reclaim.submittedAt).getTime() > STALE_SWEEP_MS) {
+    if (!(confirmations.get(reclaim.txHash) > 0) && now.getTime() - new Date(reclaim.submittedAt).getTime() > STALE_SWEEP_MS) {
       await db.collection(CAMPAIGNS_COLLECTION).updateOne(
         { _id: campaign._id, 'reclaim.txHash': reclaim.txHash },
         { $set: { 'reclaim.status': 'none' } },
@@ -106,6 +108,9 @@ export async function reclaimFunds(db, campaignId, { now = new Date(), fetchImpl
   const campaigns = db.collection(CAMPAIGNS_COLLECTION);
   const campaign = await campaigns.findOne({ _id: campaignId });
   if (!campaign) throw new ClaimInputError('Campaign not found.');
+  // The sweep pays out to whatever the database says the payout address is, so that must be
+  // what the server recorded at creation.
+  await ensureCampaignSealed(db, campaign);
 
   if (campaign.lanes?.status === 'ready') await settleClaims(db, campaignId, { now, fetchImpl });
   const eligibility = reclaimEligibility(campaign, now, await countInFlightClaims(db, campaign));

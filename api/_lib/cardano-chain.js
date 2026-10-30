@@ -2,6 +2,9 @@ import { koiosBase } from './claim-snapshot.js';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/** Blocks on top of a transaction before the site treats it as final (one block can still be rolled back). */
+export const FINALITY_CONFIRMATIONS = 3;
+
 export class ChainError extends Error {
   constructor(message, status = null) {
     super(message);

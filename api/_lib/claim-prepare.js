@@ -7,6 +7,7 @@ import {
   deriveStatus,
 } from './claim-campaign.js';
 import {
+  FINALITY_CONFIRMATIONS,
   fetchAddressUtxos,
   fetchConfirmations,
   fetchProtocolParams,
@@ -22,13 +23,14 @@ import {
   loadCsl,
 } from './claim-funding.js';
 import { signWithClaimWallet } from './claim-wallet.js';
+import { ensureCampaignSealed } from './claim-integrity.js';
 import { countInFlightClaims, settleClaims } from './claim-claims.js';
 import { settleReclaim } from './claim-reclaim.js';
 
 const FUNDING_CACHE_MS = 30_000;
 const STALE_PREPARE_MS = 10 * 60 * 1000;
 
-async function readFunding(campaign, fetchImpl) {
+export async function readFunding(campaign, fetchImpl) {
   const utxos = await fetchAddressUtxos(campaign.wallet.address, campaign.network, fetchImpl);
   const balances = summarizeUtxos(utxos, campaign.tokenY);
   return { utxos, funding: evaluateFunding(fundingRequirements(campaign), balances) };
@@ -45,7 +47,7 @@ async function settleLanes(db, campaign, now, fetchImpl) {
 
   if (lanes.txHash) {
     const confirmations = await fetchConfirmations([lanes.txHash], campaign.network, fetchImpl);
-    if ((confirmations.get(lanes.txHash) || 0) > 0) {
+    if ((confirmations.get(lanes.txHash) || 0) >= FINALITY_CONFIRMATIONS) {
       await db.collection(CAMPAIGNS_COLLECTION).updateOne(
         { _id: campaign._id, 'lanes.status': { $in: ['preparing', 'submitted'] } },
         { $set: { 'lanes.status': 'ready', 'lanes.readyAt': now } },
@@ -176,6 +178,7 @@ export async function prepareLanes(db, campaignId, { now = new Date(), fetchImpl
   let submitted = false;
   let built = null;
   try {
+    await ensureCampaignSealed(db, campaign);
     const { utxos, funding } = await readFunding(campaign, fetchImpl);
     if (funding.status !== 'funded') {
       await resetLanes(db, campaignId);
@@ -183,7 +186,7 @@ export async function prepareLanes(db, campaignId, { now = new Date(), fetchImpl
     }
 
     const entitlements = await db.collection(ENTITLEMENTS_COLLECTION)
-      .find({ campaignId }, { projection: { key: 1, amount: 1 } })
+      .find({ campaignId }, { projection: { key: 1, amount: 1, lane: 1 } })
       .toArray();
     const laneAmounts = computeLaneAmounts(entitlements, campaign.lanes.count);
 

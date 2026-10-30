@@ -1,23 +1,46 @@
 import crypto from 'node:crypto';
+import { addressBelongsToStake } from './cardano-address.js';
 
 /**
- * Claim lanes.
+ * Claim lanes (shown to people as "UTxOs").
  *
  * A campaign wallet could hold all of token Y in one UTxO, but every claim
  * spends that UTxO and recreates it, so only one claim could be in flight at a
- * time. Instead the owner "prepares" the campaign once: a single transaction
- * splits the wallet into several lanes, each holding exactly the tokens owed to
- * the claimants assigned to it. A claimant's lane comes from a hash of their
- * entitlement key, so no per-claimant assignment has to be stored.
+ * time. Instead one transaction splits the wallet into several lanes, each
+ * holding exactly the tokens owed to the claimants assigned to it. The owner
+ * chooses how many (20-100); with fewer eligible wallets than that, every
+ * wallet gets a lane of its own.
+ *
+ * Campaigns created before the owner could choose have no stored assignment:
+ * their lane comes from a hash of the entitlement key (`laneIndexFor`).
  */
 
+export const MIN_CLAIM_UTXOS = 20;
+export const MAX_CLAIM_UTXOS = 100;
+export const DEFAULT_CLAIM_UTXOS = 20;
+
+// Campaigns created before the owner's choice existed.
 export const LANE_TARGET_CLAIMS = 10;
 export const MAX_LANES = 20;
-// Minimum ADA for a token output is about 1.2-1.5 ADA; 2 ADA leaves headroom.
-export const LANE_LOVELACE_ESTIMATE = 2_000_000n;
-export const FUNDING_FEE_BUFFER = 1_000_000n;
 
-export function laneCountFor(eligibleCount) {
+// The ledger's minimum for a token output is 1.13-1.31 ADA (longer asset names need more);
+// 1.5 ADA leaves headroom. A 100-output transaction costs about 0.64 ADA in fees.
+export const LANE_LOVELACE_ESTIMATE = 1_500_000n;
+export const FUNDING_FEE_BUFFER = 1_500_000n;
+
+/** The ADA an owner sends for a given number of UTxOs. It is returned when the campaign ends. */
+export function depositLovelaceFor(utxoCount) {
+  return BigInt(utxoCount) * LANE_LOVELACE_ESTIMATE + FUNDING_FEE_BUFFER;
+}
+
+/** Accepts the owner's UTxO choice; anything else is rejected by the caller. */
+export function isValidClaimUtxoCount(value) {
+  return Number.isInteger(value) && value >= MIN_CLAIM_UTXOS && value <= MAX_CLAIM_UTXOS;
+}
+
+/** `requested` is the owner's choice; without one the pre-choice sizing applies. */
+export function laneCountFor(eligibleCount, requested) {
+  if (isValidClaimUtxoCount(requested)) return Math.max(1, Math.min(requested, eligibleCount));
   return Math.min(MAX_LANES, Math.max(1, Math.ceil(eligibleCount / LANE_TARGET_CLAIMS)));
 }
 
@@ -26,11 +49,23 @@ export function laneIndexFor(key, laneCount) {
   return digest.readUInt32BE(0) % laneCount;
 }
 
+/** The stored assignment when there is one, otherwise the older hash-based one. */
+export function laneOf(entitlement, laneCount) {
+  return Number.isInteger(entitlement.lane) ? entitlement.lane : laneIndexFor(entitlement.key, laneCount);
+}
+
+/** Spreads wallets over the lanes evenly: lane sizes differ by at most one. */
+export function assignLanes(entitlements, laneCount) {
+  return [...entitlements]
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .map((entitlement, position) => ({ ...entitlement, lane: position % laneCount }));
+}
+
 /** Sum of entitlement amounts per lane. Lanes nobody maps to are omitted. */
 export function computeLaneAmounts(entitlements, laneCount) {
   const lanes = new Map();
   for (const entitlement of entitlements) {
-    const index = laneIndexFor(entitlement.key, laneCount);
+    const index = laneOf(entitlement, laneCount);
     lanes.set(index, (lanes.get(index) || 0n) + BigInt(entitlement.amount));
   }
   return [...lanes].map(([index, amount]) => ({ index, amount })).sort((a, b) => a.index - b.index);
@@ -42,7 +77,7 @@ export function fundingRequirements(campaign) {
   const announced = campaign.distribution?.mode === 'proportional' ? campaign.distribution.totalAmount : null;
   return {
     tokens: BigInt(announced || campaign.snapshot?.totalAmount || 0),
-    lovelace: BigInt(laneCount) * LANE_LOVELACE_ESTIMATE + FUNDING_FEE_BUFFER,
+    lovelace: depositLovelaceFor(laneCount),
   };
 }
 
@@ -248,7 +283,7 @@ function multiAssetFrom(csl, entries) {
  * pays the fee. Output 0 is the claimer's tokens and output 1 the lane's remainder.
  */
 export function buildClaimTransaction({
-  csl, protocol, campaignAddress, lane, claimerAddress, claimerUtxoHexes, tokenY, amount, ttl,
+  csl, protocol, campaignAddress, lane, claimerAddress, claimerUtxos, tokenY, amount, ttl,
 }) {
   const { config, coinsPerByte } = buildConfig(csl, protocol);
   const builder = csl.TransactionBuilder.new(config);
@@ -290,20 +325,26 @@ export function buildClaimTransaction({
   if (remainderAssets.len() > 0) remainderValue.set_multiasset(remainderAssets);
   builder.add_output(csl.TransactionOutput.new(campaign, remainderValue));
 
-  // The claimer's own funds cover the tokens' ADA, the fee and a change output.
-  const parsed = claimerUtxoHexes.map((hex) => csl.TransactionUnspentOutput.from_hex(hex));
-  const spendable = parsed
-    .map((utxo) => ({ utxo, lovelace: BigInt(utxo.output().amount().coin().to_str()), tokens: Boolean(utxo.output().amount().multiasset()) }))
+  // The claimer's own funds cover the tokens' ADA, the fee and a change output. These are
+  // UTxOs the caller has already re-read from the chain and checked belong to the claimer.
+  const spendable = claimerUtxos
+    .map((utxo) => ({ utxo, lovelace: BigInt(utxo.value), tokens: (utxo.asset_list || []).length > 0 }))
     .sort((a, b) => (Number(a.tokens) - Number(b.tokens)) || (a.lovelace > b.lovelace ? -1 : 1));
 
   const required = claimerOutputLovelace + CLAIMER_BUFFER_LOVELACE;
   let gathered = 0n;
-  let used = 0;
+  const claimerInputRefs = [];
+  const claimerInputs = [];
   for (const candidate of spendable) {
-    if (gathered >= required || used >= MAX_CLAIMER_INPUTS) break;
-    builder.add_regular_input(candidate.utxo.output().address(), candidate.utxo.input(), candidate.utxo.output().amount());
+    if (gathered >= required || claimerInputRefs.length >= MAX_CLAIMER_INPUTS) break;
+    builder.add_regular_input(
+      csl.Address.from_bech32(candidate.utxo.address),
+      csl.TransactionInput.new(csl.TransactionHash.from_hex(candidate.utxo.tx_hash), candidate.utxo.tx_index),
+      valueFromKoiosUtxo(csl, candidate.utxo),
+    );
     gathered += candidate.lovelace;
-    used += 1;
+    claimerInputRefs.push(`${candidate.utxo.tx_hash}#${candidate.utxo.tx_index}`);
+    claimerInputs.push(candidate.utxo);
   }
   if (gathered < required) {
     const error = new Error('Not enough ADA in the connected wallet.');
@@ -320,7 +361,69 @@ export function buildClaimTransaction({
     fee: BigInt(transaction.body().fee().to_str()),
     laneOutputIndex: 1,
     tokenOutputLovelace: claimerOutputLovelace,
+    claimerInputRefs,
+    claimerInputs,
   };
+}
+
+/**
+ * Last line of defence before the campaign key signs anything: the transaction must
+ * contain exactly what a claim is supposed to, and nothing else. The campaign key
+ * signature is valid for every input at the campaign address, so a body that spent
+ * anything extra from there, or paid anyone but the claimer and the campaign wallet,
+ * would be a theft.
+ */
+export function assertClaimTransaction(csl, transaction, {
+  campaignAddress, claimerAddress, lane, claimerInputs, allowInput, tokenY, amount, maxFee = 2_000_000n,
+}) {
+  const refuse = (reason) => { throw new Error(`Refusing to sign the claim: ${reason}`); };
+  const body = transaction.body();
+
+  // Every input besides the lane must be one the claimer is allowed to spend, judged by
+  // what the chain says about it, and never anything at the campaign address.
+  for (const utxo of claimerInputs) {
+    if (utxo.address === campaignAddress || !allowInput(utxo)) refuse(`input ${utxo.tx_hash}#${utxo.tx_index} is not the claimer's`);
+  }
+  const claimerInputRefs = claimerInputs.map((utxo) => `${utxo.tx_hash}#${utxo.tx_index}`);
+
+  const expectedInputs = new Set([`${lane.tx_hash}#${lane.tx_index}`, ...claimerInputRefs]);
+  const inputs = body.inputs();
+  if (inputs.len() !== expectedInputs.size) refuse('unexpected number of inputs');
+  for (let i = 0; i < inputs.len(); i += 1) {
+    const input = inputs.get(i);
+    const ref = `${Buffer.from(input.transaction_id().to_bytes()).toString('hex')}#${input.index()}`;
+    if (!expectedInputs.has(ref)) refuse(`unexpected input ${ref}`);
+  }
+
+  for (const part of ['certs', 'withdrawals', 'mint', 'collateral', 'script_data_hash', 'reference_inputs', 'required_signers',
+    'auxiliary_data_hash', 'total_collateral', 'collateral_return', 'voting_procedures', 'voting_proposals', 'donation']) {
+    if (typeof body[part] === 'function' && body[part]()) refuse(`unexpected ${part}`);
+  }
+  if (!body.ttl_bignum()) refuse('no expiry');
+  if (BigInt(body.fee().to_str()) > maxFee) refuse('fee too high');
+
+  const tokens = (output) => multiAssetEntries(csl, output.amount().multiasset());
+  const outputs = body.outputs();
+  if (outputs.len() < 2 || outputs.len() > 3) refuse('unexpected number of outputs');
+
+  const first = outputs.get(0);
+  const firstTokens = tokens(first);
+  if (first.address().to_bech32() !== claimerAddress) refuse('first output is not the claimer');
+  if (firstTokens.length !== 1 || firstTokens[0].policyHex !== tokenY.policyId
+    || firstTokens[0].nameHex !== tokenY.assetNameHex || firstTokens[0].quantity !== amount) refuse('claimer output is not exactly the entitled amount');
+
+  const laneValue = valueFromKoiosUtxo(csl, lane);
+  const remainder = outputs.get(1);
+  if (remainder.address().to_bech32() !== campaignAddress) refuse('lane remainder does not return to the campaign wallet');
+  if (remainder.amount().coin().to_str() !== laneValue.coin().to_str()) refuse('lane ADA changed');
+  const expectedRemainder = multiAssetEntries(csl, laneValue.multiasset())
+    .map((entry) => (entry.policyHex === tokenY.policyId && entry.nameHex === tokenY.assetNameHex ? { ...entry, quantity: entry.quantity - amount } : entry))
+    .filter((entry) => entry.quantity > 0n)
+    .map((entry) => `${entry.policyHex}.${entry.nameHex}=${entry.quantity}`).sort();
+  const actualRemainder = tokens(remainder).map((entry) => `${entry.policyHex}.${entry.nameHex}=${entry.quantity}`).sort();
+  if (JSON.stringify(expectedRemainder) !== JSON.stringify(actualRemainder)) refuse('lane remainder tokens changed');
+
+  if (outputs.len() === 3 && outputs.get(2).address().to_bech32() !== claimerAddress) refuse('change does not return to the claimer');
 }
 
 /**
@@ -348,4 +451,98 @@ export function campaignVkeyWitness(csl, publicKeyHex, signature) {
     csl.Vkey.new(csl.PublicKey.from_bytes(Buffer.from(publicKeyHex, 'hex'))),
     csl.Ed25519Signature.from_bytes(signature),
   );
+}
+
+// Funding ---------------------------------------------------------------------
+
+/** The smallest ADA-only output the ledger accepts is about 0.97 ADA; this leaves a margin. */
+const MIN_ADA_ONLY_OUTPUT = 1_200_000n;
+const FUNDING_TTL_SLOTS = 7200;
+
+/**
+ * Builds the unsigned transaction that funds a campaign from the owner's wallet: one
+ * output to the campaign wallet carrying `tokens` and `lovelace`, change back to the
+ * owner. `ownerUtxos` are Koios-format UTxOs the caller re-read from the chain. The
+ * campaign key is not involved: only the owner's wallet signs this.
+ */
+export function buildFundingTransaction({
+  csl, protocol, ownerUtxos, ownerAddress, campaignAddress, tokenY, tokens, lovelace, tip,
+}) {
+  const { config, coinsPerByte } = buildConfig(csl, protocol);
+  const builder = csl.TransactionBuilder.new(config);
+  builder.set_ttl_bignum(csl.BigNum.from_str(String(tip + FUNDING_TTL_SLOTS)));
+  const dataCost = csl.DataCost.new_coins_per_byte(csl.BigNum.from_str(String(coinsPerByte)));
+  const campaign = csl.Address.from_bech32(campaignAddress);
+
+  let output;
+  if (tokens > 0n) {
+    const multiAsset = tokenMultiAsset(csl, tokenY, tokens);
+    output = csl.TransactionOutputBuilder.new().with_address(campaign).next()
+      .with_asset_and_min_required_coin_by_utxo_cost(multiAsset, dataCost).build();
+    const minimum = BigInt(output.amount().coin().to_str());
+    if (lovelace > minimum) {
+      output = csl.TransactionOutputBuilder.new().with_address(campaign).next()
+        .with_coin_and_asset(csl.BigNum.from_str(lovelace.toString()), multiAsset).build();
+    }
+  } else {
+    const coin = lovelace > MIN_ADA_ONLY_OUTPUT ? lovelace : MIN_ADA_ONLY_OUTPUT;
+    output = csl.TransactionOutput.new(campaign, csl.Value.new(csl.BigNum.from_str(coin.toString())));
+  }
+  builder.add_output(output);
+
+  const available = csl.TransactionUnspentOutputs.new();
+  for (const utxo of ownerUtxos) {
+    available.add(csl.TransactionUnspentOutput.new(
+      csl.TransactionInput.new(csl.TransactionHash.from_hex(utxo.tx_hash), utxo.tx_index),
+      csl.TransactionOutput.new(csl.Address.from_bech32(utxo.address), valueFromKoiosUtxo(csl, utxo)),
+    ));
+  }
+  builder.add_inputs_from(available, csl.CoinSelectionStrategyCIP2.LargestFirstMultiAsset);
+  builder.add_change_if_needed(csl.Address.from_bech32(ownerAddress));
+
+  const body = builder.build_tx().body();
+  return {
+    transaction: csl.Transaction.new(body, csl.TransactionWitnessSet.new()),
+    fee: BigInt(body.fee().to_str()),
+    lovelaceSent: BigInt(output.amount().coin().to_str()),
+  };
+}
+
+/**
+ * What the server insists on before it forwards an owner's funding transaction: it may only
+ * pay the campaign wallet (with the campaign's own token) and the owner's own address, and
+ * must not carry anything else (certificates, withdrawals, minting, scripts).
+ */
+export function assertFundingTransaction(csl, body, { campaignAddress, ownerStake, tokenY, maxFee = 3_000_000n }) {
+  const refuse = (reason) => { throw new Error(`Funding transaction refused: ${reason}.`); };
+  for (const part of ['certs', 'withdrawals', 'mint', 'collateral', 'script_data_hash', 'reference_inputs', 'required_signers',
+    'auxiliary_data_hash', 'total_collateral', 'collateral_return', 'voting_procedures', 'voting_proposals', 'donation']) {
+    if (typeof body[part] === 'function' && body[part]()) refuse(`unexpected ${part}`);
+  }
+  if (!body.ttl_bignum()) refuse('no expiry');
+  if (BigInt(body.fee().to_str()) > maxFee) refuse('fee too high');
+
+  const outputs = body.outputs();
+  if (outputs.len() < 1 || outputs.len() > 2) refuse('unexpected number of outputs');
+  const first = outputs.get(0);
+  if (first.address().to_bech32() !== campaignAddress) refuse('first output is not the campaign wallet');
+  for (const entry of multiAssetEntries(csl, first.amount().multiasset())) {
+    if (entry.policyHex !== tokenY.policyId || entry.nameHex !== tokenY.assetNameHex) refuse('it carries a different token');
+  }
+  if (outputs.len() === 2) {
+    const change = outputs.get(1).address().to_bech32();
+    if (!addressBelongsToStake(change, ownerStake)) refuse('change does not return to the owner');
+  }
+}
+
+/** Combines the owner's unsigned transaction with the witnesses their wallet produced. */
+export function assembleFundingTransaction(csl, unsignedTxHex, witnessSetHex) {
+  const body = csl.Transaction.from_hex(unsignedTxHex).body();
+  const given = csl.TransactionWitnessSet.from_hex(witnessSetHex).vkeys();
+  if (!given || given.len() === 0) throw new Error('The wallet did not return a signature.');
+  const vkeys = csl.Vkeywitnesses.new();
+  for (let index = 0; index < given.len(); index += 1) vkeys.add(given.get(index));
+  const witnessSet = csl.TransactionWitnessSet.new();
+  witnessSet.set_vkeys(vkeys);
+  return csl.Transaction.new(body, witnessSet);
 }

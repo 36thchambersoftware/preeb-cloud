@@ -23,6 +23,7 @@ const { getDb } = await import('../api/_lib/mongo.js');
 const { fetchAddressUtxos, fetchProtocolParams, submitTransaction } = await import('../api/_lib/cardano-chain.js');
 const { attachWalletWitness, buildSweepTransaction, loadCsl } = await import('../api/_lib/claim-funding.js');
 const { signWithClaimWallet } = await import('../api/_lib/claim-wallet.js');
+const { campaignSealIsValid } = await import('../api/_lib/claim-seal.js');
 
 const db = await getDb();
 const campaign = await db.collection('claim_campaigns').findOne({ _id: campaignId });
@@ -30,6 +31,14 @@ const wallet = await db.collection('claim_wallets').findOne({ _id: campaignId })
 if (!campaign || !wallet) {
   console.error(`No campaign or wallet found for ${campaignId}.`);
   process.exit(1);
+}
+
+// The payout address must be the one the server recorded at creation. A campaign whose sealed
+// fields were changed in the database is not swept unless you explicitly say so.
+if (campaign.seal && !campaignSealIsValid(campaign) && !process.argv.includes('--ignore-seal')) {
+  console.error('This campaign failed its integrity seal: its payout address or wallet was changed after creation.');
+  console.error('Do not send funds anywhere you have not checked. Re-run with --ignore-seal only if you are sure.');
+  process.exit(2);
 }
 
 const utxos = await fetchAddressUtxos(campaign.wallet.address, campaign.network);

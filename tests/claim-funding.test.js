@@ -6,6 +6,7 @@ import { enterpriseAddressFromPublicKey } from '../api/_lib/cardano-address.js';
 import {
   FUNDING_FEE_BUFFER,
   assembleClaimTransaction,
+  assertClaimTransaction,
   buildClaimTransaction,
   buildSweepTransaction,
   campaignVkeyWitness,
@@ -18,6 +19,10 @@ import {
   fundingRequirements,
   laneCountFor,
   laneIndexFor,
+  laneOf,
+  assignLanes,
+  depositLovelaceFor,
+  isValidClaimUtxoCount,
   loadCsl,
 } from '../api/_lib/claim-funding.js';
 import { summarizeUtxos } from '../api/_lib/cardano-chain.js';
@@ -40,6 +45,71 @@ test('laneCountFor scales with claimants and is capped', () => {
   assert.equal(laneCountFor(10), 1);
   assert.equal(laneCountFor(11), 2);
   assert.equal(laneCountFor(100000), MAX_LANES);
+});
+
+test('the owner\'s UTxO choice sizes the lanes: one per wallet, up to the chosen number', () => {
+  assert.equal(laneCountFor(5, 40), 5);
+  assert.equal(laneCountFor(40, 40), 40);
+  assert.equal(laneCountFor(1000, 40), 40);
+  assert.equal(laneCountFor(1000, 100), 100);
+  assert.equal(laneCountFor(1, 20), 1);
+  assert.equal(isValidClaimUtxoCount(20), true);
+  assert.equal(isValidClaimUtxoCount(100), true);
+  assert.equal(isValidClaimUtxoCount(19), false);
+  assert.equal(isValidClaimUtxoCount(101), false);
+  assert.equal(isValidClaimUtxoCount(30.5), false);
+});
+
+test('assigned lanes are even, stable and sum to every entitlement', () => {
+  const wallets = Array.from({ length: 250 }, (_, index) => ({ key: `stake1w${String(index).padStart(3, '0')}`, amount: String(index + 1) }));
+  const assigned = assignLanes(wallets, 100);
+  const sizes = new Map();
+  for (const row of assigned) sizes.set(row.lane, (sizes.get(row.lane) || 0) + 1);
+  assert.equal(sizes.size, 100);
+  assert.ok([...sizes.values()].every((size) => size === 2 || size === 3));
+  assert.deepEqual(assignLanes([...wallets].reverse(), 100), assigned);
+
+  const total = computeLaneAmounts(assigned, 100).reduce((sum, lane) => sum + lane.amount, 0n);
+  assert.equal(total, wallets.reduce((sum, row) => sum + BigInt(row.amount), 0n));
+
+  const own = assignLanes(wallets.slice(0, 30), 100);
+  assert.equal(new Set(own.map((row) => row.lane)).size, 30);
+});
+
+test('older campaigns without a stored lane keep their hash-based assignment', () => {
+  assert.equal(laneOf({ key: 'stake1abc' }, 7), laneIndexFor('stake1abc', 7));
+  assert.equal(laneOf({ key: 'stake1abc', lane: 3 }, 7), 3);
+});
+
+test('the deposit is 1.5 ADA per UTxO plus 1.5 ADA for fees, and the site shows the same numbers', async () => {
+  assert.equal(depositLovelaceFor(20), 31_500_000n);
+  assert.equal(depositLovelaceFor(100), 151_500_000n);
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../claim.js', import.meta.url), 'utf8');
+  assert.match(page, new RegExp(`UTXO_DEPOSIT_LOVELACE = ${LANE_LOVELACE_ESTIMATE.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1_')}`));
+  assert.match(page, new RegExp(`DEPOSIT_FEE_BUFFER_LOVELACE = ${FUNDING_FEE_BUFFER.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1_')}`));
+});
+
+test('100 lanes plus a full-size sweep fit comfortably in a transaction', async () => {
+  const csl = await loadCsl();
+  const address = enterpriseAddressFromPublicKey(Buffer.alloc(32, 7), 'mainnet');
+  const tokenY = { policyId: 'b'.repeat(56), assetNameHex: 'a'.repeat(64) };
+  const utxos = [{
+    tx_hash: '1'.repeat(64), tx_index: 0, address, value: '400000000',
+    asset_list: [{ policy_id: tokenY.policyId, asset_name: tokenY.assetNameHex, quantity: '1000000' }],
+  }];
+  const lanes = Array.from({ length: 100 }, (_, index) => ({ index, amount: 10_000n }));
+  const built = buildLaneTransaction({ csl, protocol: PROTOCOL, address, utxos, lanes, tokenY });
+  assert.ok(built.transaction.to_bytes().length < 12_000, 'the setup transaction stays well under 16 KB');
+  const outputs = built.transaction.body().outputs();
+  // Every lane's ADA is within what the owner is asked to deposit for it.
+  for (let index = 0; index < 100; index += 1) assert.ok(BigInt(outputs.get(index).amount().coin().to_str()) <= LANE_LOVELACE_ESTIMATE);
+  assert.ok(built.fee < FUNDING_FEE_BUFFER);
+
+  const wallet = Array.from({ length: 101 }, (_, index) => ({ tx_hash: String(index % 10).repeat(64), tx_index: index, address, value: '1500000', asset_list: [] }));
+  const sweep = buildSweepTransaction({ csl, protocol: PROTOCOL, address, utxos: wallet, destination: address });
+  assert.equal(sweep.moreRemain, false);
+  assert.ok(sweep.transaction.to_bytes().length < 8_000);
 });
 
 test('laneIndexFor is stable and lane amounts add up to the entitlements', () => {
@@ -136,20 +206,15 @@ test('the lane transaction fails when the wallet lacks the tokens', async () => 
   }));
 });
 
+// A UTxO as the chain reports it (Koios format).
 function walletUtxo(csl, address, txHash, index, lovelace, tokens = null) {
-  const value = csl.Value.new(csl.BigNum.from_str(String(lovelace)));
-  if (tokens) {
-    const assets = csl.Assets.new();
-    assets.insert(csl.AssetName.new(Buffer.from('7777', 'hex')), csl.BigNum.from_str(String(tokens)));
-    const multiAsset = csl.MultiAsset.new();
-    multiAsset.insert(csl.ScriptHash.from_hex('c'.repeat(56)), assets);
-    value.set_multiasset(multiAsset);
-  }
-  const utxo = csl.TransactionUnspentOutput.new(
-    csl.TransactionInput.new(csl.TransactionHash.from_hex(txHash), index),
-    csl.TransactionOutput.new(csl.Address.from_bech32(address), value),
-  );
-  return utxo.to_hex();
+  return {
+    tx_hash: txHash,
+    tx_index: index,
+    address,
+    value: String(lovelace),
+    asset_list: tokens ? [{ policy_id: 'c'.repeat(56), asset_name: '7777', quantity: String(tokens) }] : [],
+  };
 }
 
 test('a claim moves the claimed tokens to the claimer, keeps the rest in the lane, and the claimer pays the fee', async () => {
@@ -177,7 +242,7 @@ test('a claim moves the claimed tokens to the claimer, keeps the rest in the lan
     campaignAddress: campaign.address,
     lane,
     claimerAddress,
-    claimerUtxoHexes: claimerUtxos,
+    claimerUtxos,
     tokenY: TOKEN,
     amount: 150n,
     ttl: 123456,
@@ -231,13 +296,13 @@ test('a claim is refused when the wallet cannot cover the tokens\' ADA, the fee 
 
   assert.throws(() => buildClaimTransaction({
     csl, protocol: PROTOCOL, campaignAddress: campaign.address, lane, claimerAddress,
-    claimerUtxoHexes: [walletUtxo(csl, claimerAddress, 'd'.repeat(64), 0, 2_000_000)],
+    claimerUtxos: [walletUtxo(csl, claimerAddress, 'd'.repeat(64), 0, 2_000_000)],
     tokenY: TOKEN, amount: 5n, ttl: 1,
   }), (error) => error.code === 'insufficient-ada');
 
   assert.throws(() => buildClaimTransaction({
     csl, protocol: PROTOCOL, campaignAddress: campaign.address, lane, claimerAddress,
-    claimerUtxoHexes: [walletUtxo(csl, claimerAddress, 'd'.repeat(64), 0, 20_000_000)],
+    claimerUtxos: [walletUtxo(csl, claimerAddress, 'd'.repeat(64), 0, 20_000_000)],
     tokenY: TOKEN, amount: 11n, ttl: 1,
   }), /does not hold enough tokens/);
 });
@@ -269,4 +334,40 @@ test('a sweep sends every ADA and token in the campaign wallet to the owner', as
   assert.ok(built.fee >= minimumFee);
 
   assert.throws(() => buildSweepTransaction({ csl, protocol: PROTOCOL, address: campaign.address, utxos: [], destination: owner }), /empty/);
+});
+
+test('the signing guard refuses a claim that spends anything of the campaign wallet\'s other than the lane', async () => {
+  const csl = await loadCsl();
+  const campaign = generateClaimWallet('preprod', 'abcdefghjk');
+  const attacker = enterpriseAddressFromPublicKey(nacl.sign.keyPair.fromSeed(Buffer.alloc(32, 9)).publicKey, 0);
+  const lane = { tx_hash: 'a'.repeat(64), tx_index: 0, value: '2000000', asset_list: [{ policy_id: TOKEN.policyId, asset_name: TOKEN.assetNameHex, quantity: '1000' }] };
+  // Another UTxO at the campaign address, presented as if it were the claimer's.
+  const foreign = { tx_hash: 'e'.repeat(64), tx_index: 3, address: campaign.address, value: '50000000', asset_list: [{ policy_id: TOKEN.policyId, asset_name: TOKEN.assetNameHex, quantity: '99999' }] };
+
+  const built = buildClaimTransaction({
+    csl, protocol: PROTOCOL, campaignAddress: campaign.address, lane, claimerAddress: attacker,
+    claimerUtxos: [foreign], tokenY: TOKEN, amount: 10n, ttl: 5,
+  });
+  const guard = (overrides = {}) => assertClaimTransaction(csl, built.transaction, {
+    campaignAddress: campaign.address, claimerAddress: attacker, lane, claimerInputs: built.claimerInputs,
+    allowInput: () => true, tokenY: TOKEN, amount: 10n, ...overrides,
+  });
+
+  // The builder happily includes it, which is exactly why the guard exists.
+  assert.throws(() => guard(), /is not the claimer's/);
+
+  // A claim whose outputs were tampered with (more tokens to the claimer) is refused too.
+  const honest = buildClaimTransaction({
+    csl, protocol: PROTOCOL, campaignAddress: campaign.address, lane, claimerAddress: attacker,
+    claimerUtxos: [walletUtxo(csl, attacker, 'd'.repeat(64), 0, 20_000_000)], tokenY: TOKEN, amount: 10n, ttl: 5,
+  });
+  const check = (overrides) => assertClaimTransaction(csl, honest.transaction, {
+    campaignAddress: campaign.address, claimerAddress: attacker, lane, claimerInputs: honest.claimerInputs,
+    allowInput: () => true, tokenY: TOKEN, amount: 10n, ...overrides,
+  });
+  assert.doesNotThrow(() => check({}));
+  assert.throws(() => check({ amount: 11n }), /not exactly the entitled amount/);
+  assert.throws(() => check({ claimerAddress: campaign.address }), /not the claimer|first output/);
+  assert.throws(() => check({ allowInput: () => false }), /is not the claimer's/);
+  assert.throws(() => check({ maxFee: 1n }), /fee too high/);
 });

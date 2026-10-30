@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import { addressBelongsToStake, parseAddress } from './cardano-address.js';
 import { lookupHandle, resolveHandleStake } from './handle.js';
+import { sealCampaign, sealEntitlement } from './claim-seal.js';
 import { generateClaimWallet } from './claim-wallet.js';
-import { laneCountFor } from './claim-funding.js';
+import { assignLanes, isValidClaimUtxoCount, laneCountFor, DEFAULT_CLAIM_UTXOS, MIN_CLAIM_UTXOS, MAX_CLAIM_UTXOS } from './claim-funding.js';
 import {
   SnapshotError,
   buildEntitlements,
@@ -19,6 +20,7 @@ export const LANES_COLLECTION = 'claim_lanes';
 
 export const PUBLIC_LIST_LIMIT = 12;
 const MAX_OPEN_CAMPAIGNS_PER_OWNER = 5;
+const MAX_CAMPAIGNS_PER_HOUR = 30;
 const MAX_SNAPSHOT_ATTEMPTS = 3;
 const STALE_SNAPSHOT_MS = 10 * 60 * 1000;
 export const MIN_CLAIM_DELAY_MS = 15 * 60 * 1000;
@@ -231,6 +233,11 @@ export function parseCampaignInput(body, { ownerStake, tokenInfo, holderToken = 
     throw new ClaimInputError(`This site is running on ${network}, so the reclaim address must be a ${network} address.`, 'wallet');
   }
 
+  const claimUtxos = body.claimUtxos === undefined || body.claimUtxos === null ? DEFAULT_CLAIM_UTXOS : Number(body.claimUtxos);
+  if (!isValidClaimUtxoCount(claimUtxos)) {
+    throw new ClaimInputError(`Choose between ${MIN_CLAIM_UTXOS} and ${MAX_CLAIM_UTXOS} claim UTxOs.`, 'claim-utxos');
+  }
+
   // Without an explicit choice, fall back to the token's own artwork.
   const image = body.image?.url ? normalizeImageUrl(body.image.url) : tokenInfo.images?.[0]?.ref || null;
 
@@ -249,6 +256,7 @@ export function parseCampaignInput(body, { ownerStake, tokenInfo, holderToken = 
       exclude,
     },
     snapshot,
+    claimUtxos,
     claimStartsAt,
     claimEndsAt,
     holders: source === 'json' ? body.snapshot.holders : null,
@@ -258,13 +266,18 @@ export function parseCampaignInput(body, { ownerStake, tokenInfo, holderToken = 
 export async function createCampaign(db, input, { now = new Date() } = {}) {
   await ensureClaimIndexes(db);
 
-  const open = await db.collection(CAMPAIGNS_COLLECTION).countDocuments({
+  const countOpen = () => db.collection(CAMPAIGNS_COLLECTION).countDocuments({
     'owner.stake': input.owner.stake,
     $or: [{ claimEndsAt: null }, { claimEndsAt: { $gt: now } }],
     reclaimedAt: { $exists: false },
   });
-  if (open >= MAX_OPEN_CAMPAIGNS_PER_OWNER) {
+  if (await countOpen() >= MAX_OPEN_CAMPAIGNS_PER_OWNER) {
     throw new ClaimInputError(`You can have at most ${MAX_OPEN_CAMPAIGNS_PER_OWNER} open campaigns at a time.`);
+  }
+  // A site-wide brake, so a flood of new campaigns cannot bury real ones or fill the database.
+  const recent = await db.collection(CAMPAIGNS_COLLECTION).countDocuments({ createdAt: { $gt: new Date(now.getTime() - 60 * 60 * 1000) } });
+  if (recent >= MAX_CAMPAIGNS_PER_HOUR) {
+    throw new ClaimInputError('Too many campaigns were created in the last hour. Please try again later.');
   }
 
   // Parse the holder list up front so a bad upload fails before any wallet exists.
@@ -279,7 +292,7 @@ export async function createCampaign(db, input, { now = new Date() } = {}) {
 
   const id = generateCampaignId();
   const wallet = generateClaimWallet(input.network, id);
-  const { holders, ...fields } = input;
+  const { holders, claimUtxos, ...fields } = input;
   const campaign = {
     _id: id,
     ...fields,
@@ -292,10 +305,11 @@ export async function createCampaign(db, input, { now = new Date() } = {}) {
       error: null,
       ...(rows ? { rows } : {}),
     },
-    lanes: { status: 'none', count: 0 },
+    lanes: { status: 'none', count: 0, target: claimUtxos },
     createdAt: now,
     updatedAt: now,
   };
+  campaign.seal = sealCampaign(campaign);
 
   await db.collection(WALLETS_COLLECTION).insertOne({
     _id: id,
@@ -305,6 +319,14 @@ export async function createCampaign(db, input, { now = new Date() } = {}) {
     createdAt: now,
   });
   await db.collection(CAMPAIGNS_COLLECTION).insertOne(campaign);
+
+  // Two requests can both pass the check above, so it is repeated after inserting and the
+  // newest one backs out if the owner is now over the limit.
+  if (await countOpen() > MAX_OPEN_CAMPAIGNS_PER_OWNER) {
+    await db.collection(CAMPAIGNS_COLLECTION).deleteOne({ _id: id });
+    await db.collection(WALLETS_COLLECTION).deleteOne({ _id: id });
+    throw new ClaimInputError(`You can have at most ${MAX_OPEN_CAMPAIGNS_PER_OWNER} open campaigns at a time.`);
+  }
   return campaign;
 }
 
@@ -361,7 +383,8 @@ export function toPublicCampaign(campaign, now = new Date(), { viewerStakes = []
     funding: campaign.funding
       ? { ...campaign.funding, checkedAt: new Date(campaign.funding.checkedAt).toISOString() }
       : null,
-    lanes: { status: campaign.lanes?.status || 'none', count: campaign.lanes?.count || 0 },
+    lanes: { status: campaign.lanes?.status || 'none', count: campaign.lanes?.count || 0, target: campaign.lanes?.target || null },
+    fundingTx: campaign.fundingTx?.txHash ? { txHash: campaign.fundingTx.txHash, submittedAt: iso(campaign.fundingTx.submittedAt) } : null,
     owner: campaign.owner.stake,
     viewerIsOwner: viewerStakes.includes(campaign.owner.stake),
     tokenX: campaign.tokenX,
@@ -390,7 +413,8 @@ export function toPublicCampaign(campaign, now = new Date(), { viewerStakes = []
 
 export async function listPublicCampaigns(db, now = new Date()) {
   const campaigns = await db.collection(CAMPAIGNS_COLLECTION)
-    .find({}, { projection: { 'snapshot.rows': 0 } })
+    // `listed: false` lets the site owner hide a campaign (spam, impersonation) without deleting it.
+    .find({ listed: { $ne: false } }, { projection: { 'snapshot.rows': 0 } })
     .sort({ createdAt: -1 })
     .limit(PUBLIC_LIST_LIMIT)
     .toArray();
@@ -464,15 +488,22 @@ export async function runSnapshot(db, campaignId, { now = new Date(), fetchImpl 
       throw new SnapshotError('No eligible holders were found for this campaign.');
     }
 
+    const laneCount = laneCountFor(result.entitlements.length, campaign.lanes?.target);
+    // Campaigns from before the owner could choose keep the older, hash-based assignment.
+    const entitlements = campaign.lanes?.target ? assignLanes(result.entitlements, laneCount) : result.entitlements;
+
     await entitlementsCollection.deleteMany({ campaignId });
-    for (let start = 0; start < result.entitlements.length; start += 1000) {
+    for (let start = 0; start < entitlements.length; start += 1000) {
       await entitlementsCollection.insertMany(
-        result.entitlements.slice(start, start + 1000).map((entitlement) => ({
+        entitlements.slice(start, start + 1000).map((entitlement) => ({
           campaignId,
           ...entitlement,
           // Only used to sort the public snapshot table; amounts themselves stay exact strings.
           amountNum: Number(entitlement.amount),
           balanceNum: Number(entitlement.balance),
+          // Written by the server and checked before it signs a claim, so a row added or
+          // edited directly in the database cannot be paid out.
+          seal: sealEntitlement(campaignId, entitlement.key, entitlement.amount, entitlement.lane),
           status: 'unclaimed',
           createdAt: now,
         })),
@@ -503,7 +534,7 @@ export async function runSnapshot(db, campaignId, { now = new Date(), fetchImpl 
         'snapshot.totalBalance': result.totalBalance,
         'snapshot.totalAmount': result.totalAmount,
         'snapshot.skipped': result.skipped,
-        'lanes.count': laneCountFor(result.entitlements.length),
+        'lanes.count': laneCount,
         updatedAt: new Date(),
       },
       $unset: { 'snapshot.rows': '' },
