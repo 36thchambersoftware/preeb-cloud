@@ -14,8 +14,10 @@ function createHarness({
   fallback = false,
   strategy = { LargestFirstMultiAsset: 3, LargestFirst: 0 },
   changeError = null,
+  tip = [{ abs_slot: 1000 }],
 } = {}) {
   const events = [];
+  const ttls = [];
   const outputs = [];
   let selected = 0n;
   let selectedStrategy;
@@ -32,6 +34,7 @@ function createHarness({
   const builder = {
     set_auxiliary_data() {},
     set_certs() {},
+    set_ttl_bignum(value) { ttls.push(value.to_str()); },
     add_output(output) {
       events.push('output');
       outputs.push(BigInt(output.amount.coin().to_str()));
@@ -91,6 +94,7 @@ function createHarness({
     document,
     TextEncoder,
     cslMock: csl,
+    tipMock: tip,
     apiMock: { getChangeAddress: async () => '00' },
     deposit,
     preview: {
@@ -103,7 +107,7 @@ function createHarness({
     latestPreviewResult = preview;
     loadCardanoSerializationLib = async () => cslMock;
     getWalletUtxosWithRefresh = async () => ({ api: apiMock, utxoHexes: ['00'] });
-    fetchKoiosJson = async () => ({ max_tx_size: 16384 });
+    fetchKoiosJson = async (path) => (path === 'tip' ? tipMock : { max_tx_size: 16384 });
     buildTransactionConfig = () => ({ config: {}, maxTxSize: 16384, keyDeposit: 2000000 });
     buildPreebDelegationCertificates = async () => ({
       certificates: deposit ? {} : null, registrationDeposit: deposit,
@@ -117,7 +121,7 @@ function createHarness({
   vm.runInContext(source.slice(0, source.indexOf("  holderFileInput.addEventListener('change'")) + setup, context);
   elements.get('budget-ada').value = budget;
   elements.get('thank-you-ada').value = thankYou;
-  return { context, events, outputs, selectedStrategy: () => selectedStrategy };
+  return { context, events, outputs, ttls, selectedStrategy: () => selectedStrategy };
 }
 
 test('606 ADA airdrop builds with 1167.24 ADA after outputs precede selection', async () => {
@@ -179,4 +183,16 @@ test('sub-minimum remainder is excluded when no PREEB output is added', async ()
   });
   await harness.context.prepare();
   assert.deepEqual(harness.outputs, [600_000_000n]);
+});
+
+test('the airdrop transaction expires two hours after the current slot, and is not built without a slot', async () => {
+  const harness = createHarness({ tip: [{ abs_slot: 5_000_000 }] });
+  await harness.context.prepare();
+  assert.deepEqual(harness.ttls, ['5007200']);
+  const expiresIn = harness.context.prepared().expiresAtMs - Date.now();
+  assert.ok(expiresIn > 7190 * 1000 && expiresIn <= 7200 * 1000);
+
+  const noSlot = createHarness({ tip: [] });
+  await assert.rejects(() => noSlot.context.prepare(), /current Cardano slot/);
+  assert.equal(noSlot.context.prepared(), null);
 });

@@ -52,6 +52,9 @@
   let connectedWalletApi = null;
   let latestPreparedBatch = null;
   const KOIOS_POLICY_CACHE_KEY = 'preeb-koios-policy-cache';
+  // A slot is one second. The airdrop must be signed within two hours of being built.
+  const AIRDROP_TTL_SECONDS = 7200;
+  const AIRDROP_REBUILD_MARGIN_MS = 5 * 60 * 1000;
   const SIGNED_AIRDROP_QUEUE_KEY = 'preeb-signed-airdrop-events';
   const MAX_QUEUED_SIGNED_AIRDROPS = 25;
   const koiosPolicyCache = new Map();
@@ -666,6 +669,16 @@
       }
     }
 
+    if (Date.now() > latestPreparedBatch.expiresAtMs - AIRDROP_REBUILD_MARGIN_MS) {
+      latestPreparedBatch = null;
+      signBtn.hidden = true;
+      signBtn.disabled = true;
+      prepareBtn.hidden = false;
+      prepareBtn.disabled = false;
+      updateExecutionSteps('build');
+      throw new Error('This transaction was built a while ago and is about to expire. Rebuild it, then sign.');
+    }
+
     updateExecutionSteps('sign');
     setExecutionMessage('Requesting wallet signature...');
     const signedWitnessHex = await api.signTx(latestPreparedBatch.txHex, true);
@@ -720,6 +733,13 @@
       const batches = [validRows];
       const firstBatch = batches[0];
       const txBuilder = csl.TransactionBuilder.new(config);
+      // Without an expiry a transaction never goes stale, and a wallet that keeps its own pending copy
+      // of it has no way to ever drop that copy.
+      const tipRows = await fetchKoiosJson('tip');
+      const tipSlot = Number((Array.isArray(tipRows) ? tipRows[0] : tipRows)?.abs_slot);
+      if (!Number.isSafeInteger(tipSlot) || tipSlot <= 0) throw new Error('Could not read the current Cardano slot. Please try again.');
+      txBuilder.set_ttl_bignum(csl.BigNum.from_str(String(tipSlot + AIRDROP_TTL_SECONDS)));
+      const expiresAtMs = Date.now() + AIRDROP_TTL_SECONDS * 1000;
       if (delegation.certificates) txBuilder.set_certs(delegation.certificates);
       const normalizedPolicyId = String(policyIdInput?.value || '').trim().toLowerCase().replace(/^0x/, '');
       const policyId = getMode() === 'policy' && /^[0-9a-f]{56,112}$/.test(normalizedPolicyId)
@@ -801,6 +821,7 @@
         txSize,
         feeLovelace: BigInt(txBody.fee().to_str()),
         changeAddressHex,
+        expiresAtMs,
         batches,
       };
       signBtn.hidden = batches.length !== 1;
