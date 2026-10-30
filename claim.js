@@ -579,7 +579,7 @@
   function createSnapshotView(initialCampaign) {
     let campaign = initialCampaign;
     const id = campaign.id;
-    const state = { query: '', page: 0, token: 0, sort: 'claim', dir: 'desc', retries: 0, loaded: false };
+    const state = { query: '', page: 0, token: 0, sort: 'claim', dir: 'desc', retries: 0, loaded: false, notice: '', pickWallet: false };
     const holderTicker = campaign.tokenX?.ticker || campaign.tokenX?.name || '';
 
     const mine = el('div', 'claim-mine');
@@ -798,10 +798,44 @@
         next.appendChild(el('span', null, campaign.phase === 'claiming'
           ? 'Connect your wallet to claim.'
           : 'Connect your wallet to see what you qualify for.'));
-        const connect = el('button', 'btn btn--outline btn--sm', 'Connect wallet');
-        connect.type = 'button';
-        connect.addEventListener('click', () => document.getElementById('nav-wallet-btn')?.click());
-        next.appendChild(connect);
+        // Connect right here rather than through the header menu, which can be collapsed or close again
+        // as soon as this click reaches the page.
+        const wallets = window.PreebNavigation?.getAvailableWallets?.() || [];
+        const connectWith = async (walletConfig) => {
+          state.notice = `Connecting ${walletConfig.label}…`;
+          checkMine();
+          try {
+            await window.PreebNavigation.connectWallet(walletConfig);
+            state.notice = '';
+          } catch (error) {
+            state.notice = error?.message || 'Could not connect the wallet.';
+            checkMine();
+          }
+        };
+        if (state.pickWallet && wallets.length > 1) {
+          wallets.forEach((walletConfig) => {
+            const choice = el('button', 'btn btn--outline btn--sm', `Connect ${walletConfig.label}`);
+            choice.type = 'button';
+            choice.addEventListener('click', () => connectWith(walletConfig));
+            next.appendChild(choice);
+          });
+        } else {
+          const connect = el('button', 'btn btn--outline btn--sm', 'Connect wallet');
+          connect.type = 'button';
+          connect.addEventListener('click', () => {
+            if (wallets.length === 0) {
+              state.notice = 'No Cardano wallet extension was found in this browser. Install Eternl, Vespr, Typhon or Lace, then reload.';
+              checkMine();
+            } else if (wallets.length === 1) {
+              connectWith(wallets[0]);
+            } else {
+              state.pickWallet = true;
+              checkMine();
+            }
+          });
+          next.appendChild(connect);
+        }
+        if (state.notice) next.appendChild(el('span', 'claim-mine__status', state.notice));
         mine.className = next.className;
         mine.replaceChildren(...next.childNodes);
         return;
