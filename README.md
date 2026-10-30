@@ -16,7 +16,9 @@ This avoids Koios CORS restrictions in browsers.
 ## Deploy (Vercel)
 
 1. Import this repo into Vercel.
-2. Deploy without extra build settings.
+2. Deploy with the settings in `vercel.json`. Its build command runs `build/write-build-info.mjs`, which writes
+   `build-info.json` (the last commit time and short hash) so every page can show a small "Last updated" note.
+   `outputDirectory` is `.` because the site is served from the repo root.
 3. Verify proxy endpoint works:
 
 	`/api/koios/pool_list?ticker=eq.PREEB`
@@ -30,6 +32,7 @@ Use Vercel dev so the API route is available locally:
 1. `npm i -g vercel`
 2. `vercel dev`
 3. Open the local URL shown by Vercel and test stats loading.
+4. Run `node build/write-build-info.mjs` to create the git-ignored `build-info.json` locally; without it the "Last updated" note is simply not shown.
 
 ## Discord identity login
 

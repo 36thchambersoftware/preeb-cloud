@@ -467,6 +467,27 @@
     if (window.matchMedia('(min-width: 1041px)').matches) setOpen(false);
   });
 
+  // When the site last changed, from the file written at build time. Silently absent if it is missing.
+  (async function showLastUpdated() {
+    try {
+      const response = await fetch('/build-info.json', { cache: 'no-cache' });
+      if (!response.ok) return;
+      const { updatedAt, commit } = await response.json();
+      const date = new Date(updatedAt);
+      if (Number.isNaN(date.getTime())) return;
+      const note = document.createElement('p');
+      note.className = 'site-updated';
+      const time = document.createElement('time');
+      time.dateTime = date.toISOString();
+      time.textContent = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      note.append('Last updated ', time);
+      if (/^[0-9a-f]{7}$/.test(commit || '')) note.title = `Version ${commit}`;
+      document.body.appendChild(note);
+    } catch {
+      // The note is a nicety; the page works without it.
+    }
+  })();
+
   window.PreebNavigation = {
     getAvailableWallets,
     renderProfileChoices,

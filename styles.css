@@ -1548,6 +1548,14 @@ ul { list-style: none; }
 
 .footer__copyright { margin-top: var(--space-xs); }
 
+.site-updated {
+  margin: 0;
+  padding: 0 var(--space-md) var(--space-lg);
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
 /* ─── Mobile nav open ─── */
 .nav--open .nav__links {
   position: fixed;

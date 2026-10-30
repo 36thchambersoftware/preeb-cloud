@@ -1,4 +1,6 @@
 {
+  "buildCommand": "node build/write-build-info.mjs",
+  "outputDirectory": ".",
   "functions": {
     "api/claim/[...path].js": {
       "maxDuration": 60
